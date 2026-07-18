@@ -119,3 +119,4 @@ schoolRun/
     pages/          UI screens
   .env              secrets (gitignored)
 ```
+# school
