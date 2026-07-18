@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://scholrun-api.onrender.com';
 
 function getToken() {
   return localStorage.getItem('schoolrun_token');
@@ -43,6 +43,7 @@ export async function api(path, options = {}) {
 }
 
 export const authApi = {
+  baseURL: API_BASE,
   register: (body) => api('/auth/register', { method: 'POST', body }),
   login: (body) => api('/auth/login', { method: 'POST', body }),
   me: () => api('/auth/me'),
