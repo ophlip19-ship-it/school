@@ -18,24 +18,32 @@ import chatRoutes from './routes/chat.js';
 import adminRoutes from './routes/admin.js';
 
 const PORT = Number(process.env.PORT || 5000);
-const CLIENT_ORIGIN = process.env.MONGODB_URI || 'https://scholrun-api.onrender.com';
+// Comma-separated list supported, e.g. CLIENT_ORIGIN=https://app.vercel.app,http://localhost:3000
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  CLIENT_ORIGIN,
+  ...CLIENT_ORIGINS,
   'https://scholrun-api.onrender.com',
-  'http://localhost:3000',
+  'https://school-enlq-gkd46qu45-ugwu-obinna-s-projects.vercel.app',
   'https://school-enlq-qnw96x5r8-ugwu-obinna-s-projects.vercel.app',
+  'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ].filter(Boolean);
 
+// Deduplicate
+const uniqueOrigins = [...new Set(allowedOrigins)];
+
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: uniqueOrigins,
     methods: ['GET', 'POST'],
   },
 });
@@ -44,7 +52,7 @@ app.set('io', io);
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: uniqueOrigins,
     credentials: true,
   }),
 );
