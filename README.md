@@ -7,23 +7,28 @@ Safe school transport for parents, drivers, and admins — **real API**, **payme
 | Layer | Tech |
 |--------|------|
 | Frontend | React 19, Vite 8, Tailwind 4, React Router 7 |
-| API | Express, SQLite (`better-sqlite3`), JWT auth |
+| API | Express, Mongoose (MongoDB), bcrypt, JWT auth |
 | Realtime | Socket.IO chat rooms per ride |
 | Payments | Stripe Payment Intents **or** built-in demo checkout |
 | Maps | Mapbox GL Directions |
 
 ## Quick start
 
+**Prerequisites:** Node.js 20+ and a running MongoDB instance (local or Atlas).
+
 ```bash
 cd schoolRun
 npm install
+# Ensure MongoDB is running, then:
 npm run dev
 ```
 
 This starts:
 
 - **API** → http://localhost:5000  
-- **Web** → http://localhost:3000 (proxies `/api` and `/socket.io`)
+- **Web** → http://localhost:3000  
+
+The frontend talks to the backend via `VITE_API_URL` (default `http://localhost:5000/api`).
 
 ### Environment
 
@@ -31,12 +36,23 @@ Copy `.env.example` → `.env` (already configured for local demo):
 
 ```env
 VITE_MAPBOX_TOKEN=pk....
+VITE_API_URL=http://localhost:5000/api
+VITE_SOCKET_URL=http://localhost:5000
 PORT=5000
 JWT_SECRET=...
+MONGODB_URI=mongodb://127.0.0.1:27017/schoolrun
 DEMO_PAYMENTS=true
 # Optional real Stripe:
 # STRIPE_SECRET_KEY=sk_test_...
 # STRIPE_PUBLISHABLE_KEY=pk_test_...
+```
+
+For a hosted API (e.g. Render), set:
+
+```env
+VITE_API_URL=https://your-api.onrender.com/api
+VITE_SOCKET_URL=https://your-api.onrender.com
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/schoolrun
 ```
 
 ## Demo accounts

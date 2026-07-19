@@ -1,17 +1,18 @@
 import jwt from 'jsonwebtoken';
-import db, { publicUser } from '../db.js';
+import User from '../models/User.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'schoolrun-dev-secret-change-me';
 
 export function signToken(user) {
+  const id = user._id?.toString?.() || user.id;
   return jwt.sign(
-    { sub: user.id, role: user.role, email: user.email },
+    { sub: id, role: user.role, email: user.email },
     JWT_SECRET,
     { expiresIn: '7d' },
   );
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) {
@@ -20,12 +21,12 @@ export function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
-    if (!row) {
+    const userDoc = await User.findById(payload.sub);
+    if (!userDoc) {
       return res.status(401).json({ error: 'User not found' });
     }
-    req.user = publicUser(row);
-    req.userRow = row;
+    req.user = userDoc.toPublic();
+    req.userDoc = userDoc;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });

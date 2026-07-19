@@ -70,6 +70,8 @@ export default function SignUp() {
     } finally {
       setLoading(false);
     }
+
+     
   };
 
   return (
@@ -220,7 +222,12 @@ export default function SignUp() {
         )}
       </p>
 
+      
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+       <p className='flex flex-rol justify-between'>
+        <button onClick={()=> navigate('/verify')} className="font-bold text-4xl text-red-500">parent</button>
+       <button onClick={()=> navigate('/driver')} className="font-bold text-4xl text-red-500">driver</button>
+       <button onClick={()=> navigate('/admin')} className="font-bold text-4xl text-red-500">admin</button></p>
         <p className="font-semibold text-slate-800">Demo logins (password: password123)</p>
         <p className="mt-1">parent@schoolrun.app · driver@schoolrun.app · admin@schoolrun.app</p>
       </div>

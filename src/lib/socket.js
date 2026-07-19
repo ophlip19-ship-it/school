@@ -10,7 +10,7 @@ export function connectSocket(token) {
   if (socket?.connected) return socket;
 
   const url =
-    import.meta.env.VITE_SOCKET_URL || 'https://scholrun-api.onrender.com';
+    import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
   socket = io(url, {
     path: '/socket.io',
     auth: { token },

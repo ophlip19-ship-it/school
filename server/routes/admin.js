@@ -1,55 +1,68 @@
 import { Router } from 'express';
-import db from '../db.js';
+import User from '../models/User.js';
+import Child from '../models/Child.js';
+import Ride from '../models/Ride.js';
+import Payment from '../models/Payment.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(requireAuth, requireRole('admin'));
 
-router.get('/stats', (_req, res) => {
-  const totalUsers = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  const activeDrivers = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'driver'`).get().c;
-  const activeParents = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'parent'`).get().c;
-  const children = db.prepare('SELECT COUNT(*) AS c FROM children').get().c;
-  const completedRides = db
-    .prepare(`SELECT COUNT(*) AS c FROM rides WHERE status = 'completed'`)
-    .get().c;
-  const openRides = db
-    .prepare(`SELECT COUNT(*) AS c FROM rides WHERE status IN ('open','assigned','in_transit')`)
-    .get().c;
-  const revenue = db
-    .prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS s FROM payments WHERE status = 'succeeded'`)
-    .get().s;
-
-  const recentActivity = db
-    .prepare(`
-      SELECT r.id, r.child_name AS user, r.status AS action, r.updated_at AS time, r.payment_status AS status
-      FROM rides r
-      ORDER BY r.updated_at DESC
-      LIMIT 10
-    `)
-    .all()
-    .map((r) => ({
-      id: r.id,
-      user: r.user,
-      action: `Ride ${r.action}`,
-      time: r.time,
-      status: r.status === 'paid' ? 'success' : 'info',
-    }));
-
-  res.json({
-    stats: {
+router.get('/stats', async (_req, res) => {
+  try {
+    const [
       totalUsers,
       activeDrivers,
       activeParents,
       children,
       completedRides,
       openRides,
-      totalRevenue: Math.round(revenue / 100),
-      avgRating: 4.7,
-    },
-    recentActivity,
-  });
+      revenueAgg,
+      recent,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ role: 'driver' }),
+      User.countDocuments({ role: 'parent' }),
+      Child.countDocuments(),
+      Ride.countDocuments({ status: 'completed' }),
+      Ride.countDocuments({
+        status: { $in: ['open', 'assigned', 'in_transit'] },
+      }),
+      Payment.aggregate([
+        { $match: { status: 'succeeded' } },
+        { $group: { _id: null, total: { $sum: '$amountCents' } } },
+      ]),
+      Ride.find().sort({ updatedAt: -1 }).limit(10).lean(),
+    ]);
+
+    const revenue = revenueAgg[0]?.total || 0;
+
+    const recentActivity = recent.map((r) => ({
+      id: r._id.toString(),
+      user: r.childName,
+      action: `Ride ${r.status}`,
+      time: r.updatedAt,
+      status: r.paymentStatus === 'paid' ? 'success' : 'info',
+    }));
+
+    res.json({
+      stats: {
+        totalUsers,
+        activeDrivers,
+        activeParents,
+        children,
+        completedRides,
+        openRides,
+        totalRevenue: Math.round(revenue / 100),
+        avgRating: 4.7,
+      },
+      recentActivity,
+    });
+  } catch (err) {
+    console.error('[admin/stats]', err);
+    res.status(500).json({ error: 'Failed to load stats' });
+  }
 });
 
 export default router;
