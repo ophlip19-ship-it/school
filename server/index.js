@@ -30,12 +30,9 @@ const server = http.createServer(app);
 const allowedOrigins = [
   ...CLIENT_ORIGINS,
   'https://scholrun-api.onrender.com',
-  'https://school-enlq-gkd46qu45-ugwu-obinna-s-projects.vercel.app',
-  'https://school-enlq-qnw96x5r8-ugwu-obinna-s-projects.vercel.app',
   'http://localhost:3000',
+  'https://school-enlq-qnw96x5r8-ugwu-obinna-s-projects.vercel.app',
   'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
 ].filter(Boolean);
 
 // Deduplicate
@@ -45,6 +42,7 @@ const io = new Server(server, {
   cors: {
     origin: uniqueOrigins,
     methods: ['GET', 'POST'],
+    credentials: true
   },
 });
 
