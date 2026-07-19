@@ -132,6 +132,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    if (userDoc.suspended) {
+      return res
+        .status(403)
+        .json({ error: 'Account suspended. Contact support.' });
+    }
+
     const user = await enrichUser(userDoc.toPublic());
     const token = signToken(userDoc);
     return res.json({ token, user });

@@ -9,11 +9,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://scholrun-api.onrender.com',
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://localhost:5000',
+        target: 'https://scholrun-api.onrender.com',
         changeOrigin: true,
         ws: true,
       },

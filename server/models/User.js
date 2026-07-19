@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, default: '' },
     vehiclePlate: { type: String, default: '' },
     verified: { type: Boolean, default: false },
+    suspended: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
@@ -32,6 +33,8 @@ userSchema.methods.toPublic = function toPublic() {
     phone: this.phone || '',
     vehiclePlate: this.vehiclePlate || '',
     verified: !!this.verified,
+    suspended: !!this.suspended,
+    createdAt: this.createdAt,
     parentName:
       this.role === 'parent' || this.role === 'admin' ? this.name : undefined,
     driverName: this.role === 'driver' ? this.name : 'David K.',

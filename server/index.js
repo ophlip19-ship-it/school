@@ -66,6 +66,13 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin', adminRoutes);
 
+// JSON 404 for unknown API paths (avoid Express HTML "Cannot GET …")
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: `Cannot ${req.method} ${req.originalUrl}`,
+  });
+});
+
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });

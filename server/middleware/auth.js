@@ -25,6 +25,11 @@ export async function requireAuth(req, res, next) {
     if (!userDoc) {
       return res.status(401).json({ error: 'User not found' });
     }
+    if (userDoc.suspended) {
+      return res
+        .status(403)
+        .json({ error: 'Account suspended. Contact support.' });
+    }
     req.user = userDoc.toPublic();
     req.userDoc = userDoc;
     next();

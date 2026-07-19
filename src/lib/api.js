@@ -1,5 +1,5 @@
 const API_BASE =
-  import.meta.env.VITE_API_URL || "https://scholrun-api.onrender.com";
+  import.meta.env.VITE_API_URL || "https://scholrun-api.onrender.com/api";
 
 function getToken() {
   return localStorage.getItem("schoolrun_token");
@@ -86,6 +86,12 @@ export const chatApi = {
 
 export const adminApi = {
   stats: () => api("/admin/stats"),
+  users: (role) => api(`/admin/users?role=${encodeURIComponent(role)}`),
+  user: (id) => api(`/admin/users/${id}`),
+  suspendDriver: (id) =>
+    api(`/admin/drivers/${id}/suspend`, { method: "POST", body: {} }),
+  unsuspendDriver: (id) =>
+    api(`/admin/drivers/${id}/unsuspend`, { method: "POST", body: {} }),
 };
 
 export function formatMoney(cents, currency = "NGN") {
