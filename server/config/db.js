@@ -6,7 +6,7 @@ import Child from '../models/Child.js';
 const MONGODB_URI =
   process.env.MONGODB_URI;
 if (!MONGODB_URI) {
-  cosole.error("MONGODB_URI is not defined in evs")
+  console.error("MONGODB_URI is not defined in evs")
 }
 
 let memoryServer = null;
