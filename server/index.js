@@ -18,13 +18,14 @@ import chatRoutes from './routes/chat.js';
 import adminRoutes from './routes/admin.js';
 
 const PORT = Number(process.env.PORT || 5000);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
+const CLIENT_ORIGIN = process.env.MONGODB_URI || 'https://scholrun-api.onrender.com';
 
 const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
   CLIENT_ORIGIN,
+  'https://scholrun-api.onrender.com',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://localhost:5173',
@@ -51,7 +52,7 @@ app.use(express.json());
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    service: 'schoolrun-api',
+    service: 'scholrun-api',
     db: 'mongodb',
     time: new Date().toISOString(),
     stripe: Boolean(process.env.STRIPE_SECRET_KEY),
