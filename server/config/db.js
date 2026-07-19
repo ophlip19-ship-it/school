@@ -4,7 +4,10 @@ import User from '../models/User.js';
 import Child from '../models/Child.js';
 
 const MONGODB_URI =
-  process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/schoolrun';
+  process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error("MONGODB_URI is not defined in evs")
+}
 
 let memoryServer = null;
 
