@@ -31,7 +31,7 @@ const allowedOrigins = [
   ...CLIENT_ORIGINS,
   'https://scholrun-api.onrender.com',
   'http://localhost:3000',
-  'https://school-enlq-qnw96x5r8-ugwu-obinna-s-projects.vercel.app',
+  'https://school-enlq.vercel.app',
   'http://127.0.0.1:3000',
 ].filter(Boolean);
 
