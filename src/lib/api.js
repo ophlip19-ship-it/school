@@ -1,5 +1,5 @@
 const API_BASE =
-  import.meta.env.VITE_API_URL || "https://scholrun-api.onrender.com/api";
+  import.meta.env.VITE_API_URL || "https://scholrun-api.onrender.com";
 
 function getToken() {
   return localStorage.getItem("schoolrun_token");
