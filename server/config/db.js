@@ -62,7 +62,7 @@ async function seedIfEmpty() {
 
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const [, , parent] = await User.create([
+  const [, , , , parent] = await User.create([
     {
       email: 'driver@schoolrun.app',
       passwordHash,
@@ -70,6 +70,24 @@ async function seedIfEmpty() {
       name: 'David K.',
       phone: '+2348000000001',
       vehiclePlate: '56A-902-LGS',
+      verified: true,
+    },
+    {
+      email: 'driver2@schoolrun.app',
+      passwordHash,
+      role: 'driver',
+      name: 'Chioma Okafor',
+      phone: '+2348000000004',
+      vehiclePlate: 'ABC-441-LG',
+      verified: true,
+    },
+    {
+      email: 'driver3@schoolrun.app',
+      passwordHash,
+      role: 'driver',
+      name: 'Ibrahim Musa',
+      phone: '+2348000000005',
+      vehiclePlate: 'KJA-228-AB',
       verified: true,
     },
     {

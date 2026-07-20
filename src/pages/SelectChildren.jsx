@@ -46,14 +46,25 @@ export default function SelectChildren() {
         {children.map((child) => (
           <label
             key={child.id}
-            className={`flex cursor-pointer items-center justify-between rounded-2xl border bg-white p-5 shadow-sm transition ${
+            className={`flex cursor-pointer items-center gap-3 rounded-2xl border bg-white p-4 shadow-sm transition ${
               selected === child.id
                 ? 'border-emerald-600 ring-2 ring-emerald-600/20'
                 : 'border-slate-200'
             }`}
           >
-            <div>
-              <p className="text-lg font-semibold text-slate-900">🧒 {child.name}</p>
+            {child.photoUrl ? (
+              <img
+                src={child.photoUrl}
+                alt={child.name}
+                className="h-14 w-14 shrink-0 rounded-2xl object-cover"
+              />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-xl font-bold text-emerald-700">
+                {(child.name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-lg font-semibold text-slate-900">{child.name}</p>
               <p className="text-sm text-slate-500">
                 {child.school} · {child.grade}
               </p>

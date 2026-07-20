@@ -18,6 +18,7 @@ async function enrichUser(publicUser) {
       name: c.name,
       school: c.school,
       grade: c.grade,
+      photoUrl: c.photoUrl || '',
     }));
     const primary = mapped[0];
     return {

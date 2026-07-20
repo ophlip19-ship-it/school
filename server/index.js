@@ -16,6 +16,7 @@ import ridesRoutes from './routes/rides.js';
 import paymentsRoutes from './routes/payments.js';
 import chatRoutes from './routes/chat.js';
 import adminRoutes from './routes/admin.js';
+import driversRoutes from './routes/drivers.js';
 
 const PORT = Number(process.env.PORT || 5000);
 // Comma-separated list supported, e.g. CLIENT_ORIGIN=https://app.vercel.app,http://localhost:3000
@@ -54,7 +55,8 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
+// Larger limit so child photo data URLs can be saved
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -73,6 +75,7 @@ app.use('/api/rides', ridesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/drivers', driversRoutes);
 
 // JSON 404 for unknown API paths (avoid Express HTML "Cannot GET …")
 app.use('/api', (req, res) => {

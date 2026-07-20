@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { CreditCard, Building2, Copy, Check } from 'lucide-react';
 import { paymentsApi, ridesApi, formatMoney } from '../lib/api';
 
 function DemoPayForm({ ride, onPaid }) {
@@ -73,7 +74,7 @@ function DemoPayForm({ ride, onPaid }) {
         disabled={loading}
         className="w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white disabled:opacity-60"
       >
-        {loading ? 'Processing…' : `Pay ${formatMoney(ride.fareCents)}`}
+        {loading ? 'Processing…' : `Pay ${formatMoney(ride.fareCents)} with card`}
       </button>
     </form>
   );
@@ -122,8 +123,120 @@ function StripePayForm({ ride, paymentIntentId, onPaid }) {
         disabled={!stripe || loading}
         className="w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white disabled:opacity-60"
       >
-        {loading ? 'Processing…' : `Pay ${formatMoney(ride.fareCents)}`}
+        {loading ? 'Processing…' : `Pay ${formatMoney(ride.fareCents)} with card`}
       </button>
+    </form>
+  );
+}
+
+function TransferPayForm({ ride, transfer, onPaid }) {
+  const [senderName, setSenderName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState('');
+
+  const copy = async (label, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(''), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleConfirm = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await paymentsApi.confirmTransfer({
+        rideId: ride.id,
+        reference: transfer.reference,
+        senderName: senderName.trim(),
+      });
+      onPaid();
+    } catch (err) {
+      setError(err.message || 'Transfer confirmation failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rows = [
+    { label: 'Bank', value: transfer.bank?.bankName },
+    { label: 'Account name', value: transfer.bank?.accountName },
+    { label: 'Account number', value: transfer.bank?.accountNumber },
+    { label: 'Amount', value: formatMoney(transfer.amountCents || ride.fareCents) },
+    { label: 'Reference', value: transfer.reference },
+  ];
+
+  return (
+    <form onSubmit={handleConfirm} className="mt-6 space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+        {transfer.instructions ||
+          'Transfer the exact amount using the reference below, then confirm payment.'}
+      </div>
+
+      <div className="space-y-2 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex items-center justify-between gap-3 border-b border-slate-100 py-2.5 last:border-0"
+          >
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                {row.label}
+              </p>
+              <p className="mt-0.5 font-semibold text-slate-900 break-all">
+                {row.value || '—'}
+              </p>
+            </div>
+            {row.value && row.label !== 'Amount' && (
+              <button
+                type="button"
+                onClick={() => copy(row.label, String(row.value))}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                {copied === row.label ? (
+                  <>
+                    <Check size={12} className="text-emerald-600" /> Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} /> Copy
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">
+          Your name on the transfer (optional)
+        </label>
+        <input
+          value={senderName}
+          onChange={(e) => setSenderName(e.target.value)}
+          placeholder="Name used for the bank transfer"
+          className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-600/30"
+        />
+      </div>
+
+      {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white disabled:opacity-60"
+      >
+        {loading ? 'Confirming…' : `I’ve paid ${formatMoney(ride.fareCents)}`}
+      </button>
+      <p className="text-center text-xs text-slate-500">
+        Demo mode marks the ride paid after you confirm. Production would verify the transfer automatically.
+      </p>
     </form>
   );
 }
@@ -136,6 +249,8 @@ export default function Payment() {
   const [ride, setRide] = useState(null);
   const [intent, setIntent] = useState(null);
   const [stripePromise, setStripePromise] = useState(null);
+  const [transfer, setTransfer] = useState(null);
+  const [method, setMethod] = useState('card'); // card | transfer
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -148,19 +263,39 @@ export default function Payment() {
 
     (async () => {
       try {
-        const [{ ride: r }, config, intentRes] = await Promise.all([
+        const [{ ride: r }, config, intentRes, transferRes] = await Promise.all([
           ridesApi.get(rideId),
           paymentsApi.config(),
-          paymentsApi.createIntent(rideId),
+          paymentsApi.createIntent(rideId).catch((err) => {
+            // Already paid or other non-fatal for transfer path
+            if (String(err.message || '').toLowerCase().includes('already paid')) {
+              return { alreadyPaid: true };
+            }
+            throw err;
+          }),
+          paymentsApi.transferDetails(rideId).catch(() => null),
         ]);
         setRide(r);
         setIntent(intentRes);
+        setTransfer(
+          transferRes || {
+            reference: `SR-${String(r.id).slice(-6).toUpperCase()}`,
+            amountCents: r.fareCents,
+            bank: config.transfer || {
+              bankName: 'SchoolRun Escrow Bank',
+              accountName: 'SchoolRun Payments Ltd',
+              accountNumber: '0123456789',
+            },
+            instructions:
+              'Transfer the exact amount and use the payment reference as your narration.',
+          },
+        );
 
-        if (!intentRes.demoMode && config.publishableKey) {
+        if (!intentRes?.demoMode && intentRes?.clientSecret && config.publishableKey) {
           setStripePromise(loadStripe(config.publishableKey));
         }
 
-        if (r.paymentStatus === 'paid') {
+        if (r.paymentStatus === 'paid' || intentRes?.alreadyPaid) {
           navigate(`/live-tracking?rideId=${r.id}`, { replace: true });
         }
       } catch (err) {
@@ -192,11 +327,13 @@ export default function Payment() {
 
   return (
     <div className="mx-auto max-w-md p-6 pb-28">
-      <Link to="/vehicle-review" className="text-sm font-medium text-emerald-600">
-        ← Back
+      <Link to="/dashboard" className="text-sm font-medium text-emerald-600">
+        ← Dashboard
       </Link>
       <h1 className="mt-4 text-3xl font-bold text-slate-900">Payment</h1>
-      <p className="mt-2 text-slate-600">Secure checkout for {ride.childName}&apos;s trip</p>
+      <p className="mt-2 text-slate-600">
+        Pay with card or bank transfer for {ride.childName}&apos;s trip
+      </p>
 
       <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex justify-between text-sm">
@@ -217,7 +354,35 @@ export default function Payment() {
         </div>
       </div>
 
-      {intent?.demoMode || !intent?.clientSecret ? (
+      {/* Method toggle */}
+      <div className="mt-6 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+        <button
+          type="button"
+          onClick={() => setMethod('card')}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition ${
+            method === 'card'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <CreditCard size={16} /> Card
+        </button>
+        <button
+          type="button"
+          onClick={() => setMethod('transfer')}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition ${
+            method === 'transfer'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Building2 size={16} /> Transfer
+        </button>
+      </div>
+
+      {method === 'transfer' ? (
+        transfer && <TransferPayForm ride={ride} transfer={transfer} onPaid={onPaid} />
+      ) : intent?.demoMode || !intent?.clientSecret ? (
         <DemoPayForm ride={ride} onPaid={onPaid} />
       ) : (
         stripePromise && (

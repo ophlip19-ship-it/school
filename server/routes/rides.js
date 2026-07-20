@@ -116,12 +116,11 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       time,
       tripType = 'pickup',
       fareCents = 250000,
+      instant = false,
     } = req.body || {};
 
-    if (!childId || !pickup || !dropoff || !date || !time) {
-      return res.status(400).json({
-        error: 'childId, pickup, dropoff, date, and time are required',
-      });
+    if (!childId) {
+      return res.status(400).json({ error: 'childId is required' });
     }
 
     const child = await Child.findOne({
@@ -130,18 +129,45 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     });
     if (!child) return res.status(400).json({ error: 'Invalid child' });
 
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const rideDate =
+      date ||
+      `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const rideTime =
+      time || `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    let ridePickup = pickup;
+    let rideDropoff = dropoff;
+
+    // Instant rides fill sensible defaults when locations are omitted
+    if (instant) {
+      ridePickup =
+        ridePickup ||
+        `Home · pickup for ${child.name}`;
+      rideDropoff =
+        rideDropoff ||
+        `${child.school || 'School'} · main gate`;
+    }
+
+    if (!ridePickup || !rideDropoff) {
+      return res.status(400).json({
+        error: 'childId, pickup, dropoff, date, and time are required',
+      });
+    }
+
     const pin = String(Math.floor(1000 + Math.random() * 9000));
     const created = await Ride.create({
       parentId: req.user.id,
       childId: child._id,
       childName: child.name,
-      pickup: String(pickup).trim(),
-      dropoff: String(dropoff).trim(),
-      rideDate: date,
-      rideTime: time,
-      tripType,
+      pickup: String(ridePickup).trim(),
+      dropoff: String(rideDropoff).trim(),
+      rideDate,
+      rideTime,
+      tripType: instant ? tripType || 'pickup' : tripType,
       status: 'pending_payment',
-      fareCents: Number(fareCents) || 250000,
+      fareCents: Number(fareCents) || (instant ? 300000 : 250000),
       currency: 'ngn',
       handoverPin: pin,
       paymentStatus: 'unpaid',

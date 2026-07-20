@@ -32,11 +32,19 @@ async function markRidePaid(rideId, userId, amountCents, provider, providerRef) 
   return payment._id.toString();
 }
 
+const TRANSFER_BANK = {
+  bankName: process.env.TRANSFER_BANK_NAME || 'SchoolRun Escrow Bank',
+  accountName: process.env.TRANSFER_ACCOUNT_NAME || 'SchoolRun Payments Ltd',
+  accountNumber: process.env.TRANSFER_ACCOUNT_NUMBER || '0123456789',
+};
+
 router.get('/config', (_req, res) => {
   res.json({
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
     demoMode: !stripe || demoPayments,
     currency: 'ngn',
+    methods: ['card', 'transfer'],
+    transfer: TRANSFER_BANK,
   });
 });
 
@@ -228,6 +236,105 @@ router.post(
       return res
         .status(502)
         .json({ error: err.message || 'Stripe confirmation failed' });
+    }
+  },
+);
+
+/**
+ * Bank transfer payment details + payment reference for a ride.
+ * Parent transfers the fare using the reference, then confirms.
+ */
+router.get(
+  '/transfer-details/:rideId',
+  requireAuth,
+  requireRole('parent'),
+  async (req, res) => {
+    try {
+      const ride = await Ride.findOne({
+        _id: req.params.rideId,
+        parentId: req.user.id,
+      });
+      if (!ride) return res.status(404).json({ error: 'Ride not found' });
+      if (ride.paymentStatus === 'paid') {
+        return res.status(400).json({ error: 'Ride already paid' });
+      }
+
+      const shortId = ride._id.toString().slice(-6).toUpperCase();
+      const reference = `SR-${shortId}`;
+
+      res.json({
+        rideId: ride._id.toString(),
+        amountCents: ride.fareCents,
+        currency: ride.currency || 'ngn',
+        reference,
+        bank: TRANSFER_BANK,
+        instructions:
+          'Transfer the exact amount and use the payment reference as your transfer narration. Then tap “I’ve paid” to confirm.',
+      });
+    } catch (err) {
+      console.error('[payments transfer-details]', err);
+      res.status(500).json({ error: 'Failed to load transfer details' });
+    }
+  },
+);
+
+/**
+ * Confirm bank transfer (demo / manual verification path).
+ * In production this would wait for webhook from a payment provider.
+ */
+router.post(
+  '/confirm-transfer',
+  requireAuth,
+  requireRole('parent'),
+  async (req, res) => {
+    try {
+      const { rideId, reference, senderName } = req.body || {};
+      if (!rideId) return res.status(400).json({ error: 'rideId is required' });
+
+      const ride = await Ride.findOne({
+        _id: rideId,
+        parentId: req.user.id,
+      });
+      if (!ride) return res.status(404).json({ error: 'Ride not found' });
+      if (ride.paymentStatus === 'paid') {
+        return res.json({ ok: true, alreadyPaid: true });
+      }
+
+      const shortId = ride._id.toString().slice(-6).toUpperCase();
+      const expectedRef = `SR-${shortId}`;
+      const given = String(reference || '').trim().toUpperCase();
+      if (given && given !== expectedRef && !given.includes(shortId)) {
+        return res.status(400).json({
+          error: `Reference should be ${expectedRef} (or include ${shortId})`,
+        });
+      }
+
+      const paymentId = await markRidePaid(
+        ride._id,
+        req.user.id,
+        ride.fareCents,
+        'transfer',
+        given || expectedRef,
+      );
+
+      // Store optional sender note on payment via providerRef already set
+      void senderName;
+
+      const updated = await Ride.findById(ride._id);
+      res.json({
+        ok: true,
+        paymentId,
+        method: 'transfer',
+        ride: {
+          id: updated._id.toString(),
+          status: updated.status,
+          paymentStatus: updated.paymentStatus,
+          handoverPin: updated.handoverPin,
+        },
+      });
+    } catch (err) {
+      console.error('[payments confirm-transfer]', err);
+      res.status(500).json({ error: 'Transfer confirmation failed' });
     }
   },
 );

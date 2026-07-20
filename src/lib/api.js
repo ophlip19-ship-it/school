@@ -57,6 +57,10 @@ export const childrenApi = {
   update: (id, body) => api(`/children/${id}`, { method: "PATCH", body }),
 };
 
+export const driversApi = {
+  active: () => api("/drivers/active"),
+};
+
 export const ridesApi = {
   list: () => api("/rides"),
   available: () => api("/rides/available"),
@@ -76,6 +80,9 @@ export const paymentsApi = {
     api("/payments/confirm-demo", { method: "POST", body }),
   confirmStripe: (body) =>
     api("/payments/confirm-stripe", { method: "POST", body }),
+  transferDetails: (rideId) => api(`/payments/transfer-details/${rideId}`),
+  confirmTransfer: (body) =>
+    api("/payments/confirm-transfer", { method: "POST", body }),
 };
 
 export const chatApi = {
