@@ -51,6 +51,7 @@ export default function HomeDashboard() {
   const [instantLoading, setInstantLoading] = useState(false);
   const [instantError, setInstantError] = useState('');
   const [selectedChildId, setSelectedChildId] = useState(null);
+  const [selectedDriverId, setSelectedDriverId] = useState(null);
 
   const children = user?.children || [];
 
@@ -65,13 +66,21 @@ export default function HomeDashboard() {
     ridesApi.list().then(({ rides: list }) => setRides(list.slice(0, 5))).catch(() => {});
     driversApi
       .active()
-      .then(({ drivers: list }) => setDrivers(list))
+      .then(({ drivers: list }) => {
+        setDrivers(list);
+        const firstAvailable = list.find((d) => d.available);
+        if (firstAvailable) setSelectedDriverId(firstAvailable.id);
+      })
       .catch(() => setDrivers([]));
   }, []);
 
   const childName = user?.childName || children[0]?.name || 'your child';
   const school = user?.school || children[0]?.school || 'School';
   const availableDrivers = drivers.filter((d) => d.available);
+  const selectedDriver =
+    availableDrivers.find((d) => d.id === selectedDriverId) ||
+    availableDrivers[0] ||
+    null;
 
   const bookInstant = async () => {
     setInstantError('');
@@ -85,11 +94,16 @@ export default function HomeDashboard() {
       setInstantError('You already have an active trip. Track it or wait until it finishes.');
       return;
     }
+    if (!selectedDriver) {
+      setInstantError('Pick an available driver to book an instant ride.');
+      return;
+    }
 
     setInstantLoading(true);
     try {
       const { ride } = await ridesApi.create({
         childId: child.id,
+        driverId: selectedDriver.id,
         instant: true,
         tripType: 'pickup',
         pickup: `Home · pickup for ${child.name}`,
@@ -150,6 +164,71 @@ export default function HomeDashboard() {
           </div>
         )}
 
+        {/* Driver picker for instant ride */}
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            Choose your driver
+          </p>
+          {availableDrivers.length > 0 ? (
+            <div className="max-h-48 space-y-2 overflow-y-auto pr-0.5">
+              {availableDrivers.map((driver) => {
+                const selected = selectedDriver?.id === driver.id;
+                return (
+                  <button
+                    key={driver.id}
+                    type="button"
+                    onClick={() => setSelectedDriverId(driver.id)}
+                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition ${
+                      selected
+                        ? 'bg-white text-slate-900 shadow-md'
+                        : 'bg-white/10 text-white hover:bg-white/15'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${
+                        selected ? 'bg-emerald-100' : 'bg-white/10'
+                      }`}
+                    >
+                      🚗
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-semibold">
+                          {driver.name}
+                        </span>
+                        {driver.verified && (
+                          <Shield
+                            size={12}
+                            className={selected ? 'text-emerald-600' : 'text-emerald-300'}
+                          />
+                        )}
+                      </div>
+                      <p
+                        className={`mt-0.5 truncate text-xs ${
+                          selected ? 'text-slate-500' : 'text-slate-300'
+                        }`}
+                      >
+                        {driver.vehiclePlate || 'No plate'} · ★ {driver.rating}
+                      </p>
+                    </div>
+                    <span
+                      className={`h-4 w-4 shrink-0 rounded-full border-2 ${
+                        selected
+                          ? 'border-emerald-600 bg-emerald-600'
+                          : 'border-white/40'
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-300">
+              No drivers available right now. Try scheduling a ride for later, or check back soon.
+            </p>
+          )}
+        </div>
+
         {instantError && (
           <p className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100">
             {instantError}
@@ -159,14 +238,22 @@ export default function HomeDashboard() {
         <button
           type="button"
           onClick={bookInstant}
-          disabled={instantLoading || children.length === 0}
+          disabled={
+            instantLoading ||
+            children.length === 0 ||
+            availableDrivers.length === 0
+          }
           className="mt-5 w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {instantLoading
             ? 'Creating ride…'
             : children.length === 0
               ? 'Add a child to book'
-              : `Book instant ride · ${formatMoney(300000)}`}
+              : availableDrivers.length === 0
+                ? 'No drivers available'
+                : selectedDriver
+                  ? `Book ${selectedDriver.name} · ${formatMoney(300000)}`
+                  : `Book instant ride · ${formatMoney(300000)}`}
         </button>
         <Link
           to="/select-children"
@@ -219,7 +306,7 @@ export default function HomeDashboard() {
         </div>
       ) : null}
 
-      {/* Active drivers */}
+      {/* Active drivers — tap to select for instant ride */}
       <div className="mb-8">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-bold text-slate-900">Active drivers</h2>
@@ -228,49 +315,71 @@ export default function HomeDashboard() {
           </span>
         </div>
         <div className="space-y-3">
-          {drivers.slice(0, 6).map((driver) => (
-            <div
-              key={driver.id}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-xl">
-                🚗
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="truncate font-semibold text-slate-900">
-                    {driver.name}
-                  </h3>
-                  {driver.verified && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                      <Shield size={10} /> Verified
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 flex items-center gap-1 text-sm text-slate-500">
-                  <Car size={14} />
-                  <span className="font-mono text-slate-700">
-                    {driver.vehiclePlate || '—'}
-                  </span>
-                  <span className="mx-1">·</span>
-                  <Star size={12} className="fill-amber-400 text-amber-400" />
-                  {driver.rating}
-                </p>
-              </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                  driver.available
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-amber-50 text-amber-700'
+          {drivers.slice(0, 6).map((driver) => {
+            const selected = selectedDriver?.id === driver.id && driver.available;
+            return (
+              <button
+                key={driver.id}
+                type="button"
+                disabled={!driver.available}
+                onClick={() => {
+                  if (driver.available) {
+                    setSelectedDriverId(driver.id);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }}
+                className={`flex w-full items-center gap-3 rounded-2xl border bg-white p-4 text-left shadow-sm transition ${
+                  selected
+                    ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                    : driver.available
+                      ? 'border-slate-200 hover:border-emerald-400'
+                      : 'cursor-not-allowed border-slate-200 opacity-70'
                 }`}
               >
-                {driver.available ? 'Available' : 'On trip'}
-              </span>
-            </div>
-          ))}
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-xl">
+                  🚗
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate font-semibold text-slate-900">
+                      {driver.name}
+                    </h3>
+                    {driver.verified && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                        <Shield size={10} /> Verified
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 flex items-center gap-1 text-sm text-slate-500">
+                    <Car size={14} />
+                    <span className="font-mono text-slate-700">
+                      {driver.vehiclePlate || '—'}
+                    </span>
+                    <span className="mx-1">·</span>
+                    <Star size={12} className="fill-amber-400 text-amber-400" />
+                    {driver.rating}
+                  </p>
+                  {driver.available && (
+                    <p className="mt-1 text-xs font-medium text-emerald-700">
+                      {selected ? 'Selected for instant ride' : 'Tap to select for instant ride'}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    driver.available
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  {driver.available ? 'Available' : 'On trip'}
+                </span>
+              </button>
+            );
+          })}
           {drivers.length === 0 && (
             <p className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-sm text-slate-500">
-              No drivers online right now. You can still book — a driver will pick up your ride.
+              No drivers online right now. Check back soon or schedule a ride for later.
             </p>
           )}
         </div>

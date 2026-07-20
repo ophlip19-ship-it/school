@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Ride from '../models/Ride.js';
 import Child from '../models/Child.js';
+import User from '../models/User.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { mapRide } from '../utils/mappers.js';
 
@@ -27,9 +28,13 @@ router.get('/', requireAuth, async (req, res) => {
     if (req.user.role === 'parent') {
       rides = await findRidesPopulated({ parentId: req.user.id });
     } else if (req.user.role === 'driver') {
+      // Only paid / active work — hide unpaid pending_payment bookings
       rides = await findRidesPopulated({
         $or: [
-          { driverId: req.user.id },
+          {
+            driverId: req.user.id,
+            status: { $in: ['assigned', 'in_transit', 'completed', 'open'] },
+          },
           { status: 'open', driverId: null },
         ],
       });
@@ -117,6 +122,7 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       tripType = 'pickup',
       fareCents = 250000,
       instant = false,
+      driverId = null,
     } = req.body || {};
 
     if (!childId) {
@@ -128,6 +134,22 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       parentId: req.user.id,
     });
     if (!child) return res.status(400).json({ error: 'Invalid child' });
+
+    // Optional preferred driver — parent may pick any active (non-suspended) driver
+    let preferredDriverId = null;
+    if (driverId) {
+      const driver = await User.findOne({
+        _id: driverId,
+        role: 'driver',
+        suspended: { $ne: true },
+      });
+      if (!driver) {
+        return res.status(400).json({
+          error: 'Selected driver is not available. Pick another driver.',
+        });
+      }
+      preferredDriverId = driver._id;
+    }
 
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
@@ -161,6 +183,7 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       parentId: req.user.id,
       childId: child._id,
       childName: child.name,
+      driverId: preferredDriverId,
       pickup: String(ridePickup).trim(),
       dropoff: String(rideDropoff).trim(),
       rideDate,

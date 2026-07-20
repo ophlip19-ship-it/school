@@ -336,6 +336,15 @@ export default function Payment() {
       </p>
 
       <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        {ride.driverName && (
+          <div className="mb-3 flex justify-between text-sm">
+            <span className="text-slate-500">Driver</span>
+            <span className="font-medium text-slate-900">
+              {ride.driverName}
+              {ride.vehiclePlate ? ` · ${ride.vehiclePlate}` : ''}
+            </span>
+          </div>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-slate-500">Route</span>
           <span className="max-w-[60%] text-right font-medium text-slate-900">
