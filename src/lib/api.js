@@ -70,6 +70,9 @@ export const ridesApi = {
   accept: (id) => api(`/rides/${id}/accept`, { method: "POST", body: {} }),
   setStatus: (id, status) =>
     api(`/rides/${id}/status`, { method: "PATCH", body: { status } }),
+  getLocation: (id) => api(`/rides/${id}/location`),
+  updateLocation: (id, body) =>
+    api(`/rides/${id}/location`, { method: "POST", body }),
 };
 
 export const paymentsApi = {

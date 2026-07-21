@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MapPin, Clock, Phone, MessageSquare } from 'lucide-react';
 import { ridesApi } from '../lib/api';
+import { connectSocket, getSocket } from '../lib/socket';
+import { watchPosition } from '../lib/geo';
 
 export default function DriverTripActive() {
   const navigate = useNavigate();
   const [ride, setRide] = useState(null);
   const [error, setError] = useState('');
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     ridesApi
@@ -14,6 +17,46 @@ export default function DriverTripActive() {
       .then(({ ride: r }) => setRide(r))
       .catch((err) => setError(err.message));
   }, []);
+
+  // Share GPS so parents see the blue trail in real time
+  useEffect(() => {
+    if (!ride?.id) return undefined;
+    if (!['assigned', 'in_transit'].includes(ride.status)) return undefined;
+
+    const token = localStorage.getItem('schoolrun_token');
+    const socket = connectSocket(token);
+    socket.emit('ride:join', { rideId: ride.id });
+    setSharing(true);
+
+    const stopWatch = watchPosition(
+      (pos) => {
+        const s = getSocket();
+        if (s?.connected) {
+          s.emit('ride:location', {
+            rideId: ride.id,
+            lng: pos.lng,
+            lat: pos.lat,
+            heading: pos.heading || 0,
+          });
+        } else {
+          ridesApi
+            .updateLocation(ride.id, {
+              lng: pos.lng,
+              lat: pos.lat,
+              heading: pos.heading || 0,
+            })
+            .catch(() => {});
+        }
+      },
+      () => setSharing(false),
+    );
+
+    return () => {
+      stopWatch();
+      socket.emit('ride:leave', { rideId: ride.id });
+      setSharing(false);
+    };
+  }, [ride?.id, ride?.status]);
 
   const updateStatus = async (status) => {
     if (!ride) return;
@@ -51,6 +94,11 @@ export default function DriverTripActive() {
             <p className="text-xs font-semibold uppercase tracking-widest text-emerald-100">
               {ride.status}
             </p>
+            {sharing && (
+              <p className="mt-1 text-xs font-medium text-emerald-100">
+                ● Live location sharing on — parent can track you
+              </p>
+            )}
             <h2 className="mt-2 text-3xl font-bold">{ride.childName}</h2>
             <div className="mt-4 space-y-2 text-sm text-emerald-50">
               <p className="flex items-center gap-2">

@@ -47,6 +47,16 @@ router.get(
             available,
             activeTrips: activeCount,
             completedTrips: completedCount,
+            // Live map pin when driver has shared GPS recently
+            location:
+              d.lastLocation?.lng != null && d.lastLocation?.lat != null
+                ? {
+                    lng: d.lastLocation.lng,
+                    lat: d.lastLocation.lat,
+                    heading: d.lastLocation.heading || 0,
+                    updatedAt: d.lastLocation.updatedAt,
+                  }
+                : null,
             // Simple demo rating derived from trip volume
             rating: Math.min(
               5,

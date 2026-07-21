@@ -155,11 +155,24 @@ router.get('/me', requireAuth, async (req, res) => {
 
 router.patch('/me', requireAuth, async (req, res) => {
   try {
-    const { name, phone, vehiclePlate } = req.body || {};
+    const { name, phone, vehiclePlate, homeAddress, homeCoords } = req.body || {};
     if (name != null) req.userDoc.name = String(name).trim();
     if (phone != null) req.userDoc.phone = String(phone).trim();
     if (vehiclePlate != null) {
       req.userDoc.vehiclePlate = String(vehiclePlate).trim();
+    }
+    if (homeAddress != null) {
+      req.userDoc.homeAddress = String(homeAddress).trim();
+    }
+    if (
+      homeCoords &&
+      Number.isFinite(Number(homeCoords.lng)) &&
+      Number.isFinite(Number(homeCoords.lat))
+    ) {
+      req.userDoc.homeCoords = {
+        lng: Number(homeCoords.lng),
+        lat: Number(homeCoords.lat),
+      };
     }
     await req.userDoc.save();
     const user = await enrichUser(req.userDoc.toPublic());

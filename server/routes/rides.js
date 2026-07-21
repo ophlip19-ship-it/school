@@ -111,12 +111,25 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
+function parseCoords(input) {
+  if (!input || typeof input !== 'object') return null;
+  const lng = Number(input.lng);
+  const lat = Number(input.lat);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  if (Math.abs(lng) > 180 || Math.abs(lat) > 90) return null;
+  return { lng, lat };
+}
+
+const TRAIL_MAX = 400;
+
 router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
   try {
     const {
       childId,
       pickup,
       dropoff,
+      pickupCoords,
+      dropoffCoords,
       date,
       time,
       tripType = 'pickup',
@@ -151,6 +164,10 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       preferredDriverId = driver._id;
     }
 
+    const parent = await User.findById(req.user.id).select(
+      'homeAddress homeCoords',
+    );
+
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const rideDate =
@@ -161,15 +178,23 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
 
     let ridePickup = pickup;
     let rideDropoff = dropoff;
+    let fromCoords = parseCoords(pickupCoords);
+    let toCoords = parseCoords(dropoffCoords);
 
     // Instant rides fill sensible defaults when locations are omitted
     if (instant) {
       ridePickup =
         ridePickup ||
+        parent?.homeAddress ||
         `Home · pickup for ${child.name}`;
       rideDropoff =
-        rideDropoff ||
-        `${child.school || 'School'} · main gate`;
+        rideDropoff || `${child.school || 'School'} · main gate`;
+      if (!fromCoords && parent?.homeCoords?.lng != null) {
+        fromCoords = {
+          lng: parent.homeCoords.lng,
+          lat: parent.homeCoords.lat,
+        };
+      }
     }
 
     if (!ridePickup || !rideDropoff) {
@@ -177,6 +202,10 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
         error: 'childId, pickup, dropoff, date, and time are required',
       });
     }
+
+    // Lagos-area fallbacks so maps always have anchors
+    if (!fromCoords) fromCoords = { lng: 3.4734, lat: 6.4474 };
+    if (!toCoords) toCoords = { lng: 3.4219, lat: 6.4281 };
 
     const pin = String(Math.floor(1000 + Math.random() * 9000));
     const created = await Ride.create({
@@ -186,6 +215,15 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       driverId: preferredDriverId,
       pickup: String(ridePickup).trim(),
       dropoff: String(rideDropoff).trim(),
+      pickupCoords: fromCoords,
+      dropoffCoords: toCoords,
+      driverLocation: {
+        lng: fromCoords.lng,
+        lat: fromCoords.lat,
+        heading: 0,
+        updatedAt: null,
+      },
+      trail: [],
       rideDate,
       rideTime,
       tripType: instant ? tripType || 'pickup' : tripType,
@@ -201,6 +239,137 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
   } catch (err) {
     console.error('[rides POST]', err);
     res.status(500).json({ error: 'Failed to create ride' });
+  }
+});
+
+/** Driver (or admin) pushes GPS; parents read via GET / map socket */
+router.post('/:id/location', requireAuth, async (req, res) => {
+  try {
+    const coords = parseCoords(req.body);
+    if (!coords) {
+      return res.status(400).json({ error: 'lng and lat are required' });
+    }
+    const heading = Number(req.body?.heading) || 0;
+
+    const ride = await Ride.findById(req.params.id);
+    if (!ride) return res.status(404).json({ error: 'Ride not found' });
+
+    const isDriver = ride.driverId?.toString() === req.user.id;
+    if (req.user.role !== 'admin' && !isDriver) {
+      return res.status(403).json({ error: 'Only the assigned driver can update location' });
+    }
+
+    const now = new Date();
+    ride.driverLocation = {
+      lng: coords.lng,
+      lat: coords.lat,
+      heading,
+      updatedAt: now,
+    };
+
+    const trail = Array.isArray(ride.trail) ? ride.trail : [];
+    const last = trail[trail.length - 1];
+    const movedEnough =
+      !last ||
+      Math.abs(last.lng - coords.lng) > 0.00002 ||
+      Math.abs(last.lat - coords.lat) > 0.00002;
+    if (movedEnough) {
+      trail.push({ lng: coords.lng, lat: coords.lat, at: now });
+      if (trail.length > TRAIL_MAX) {
+        ride.trail = trail.slice(trail.length - TRAIL_MAX);
+      } else {
+        ride.trail = trail;
+      }
+    }
+
+    await ride.save();
+
+    // Keep driver's last known position for live maps
+    await User.findByIdAndUpdate(req.user.id, {
+      lastLocation: {
+        lng: coords.lng,
+        lat: coords.lat,
+        heading,
+        updatedAt: now,
+      },
+    });
+
+    const payload = {
+      rideId: ride._id.toString(),
+      lng: coords.lng,
+      lat: coords.lat,
+      heading,
+      updatedAt: now,
+      trail: ride.trail.map((p) => ({
+        lng: p.lng,
+        lat: p.lat,
+        at: p.at,
+      })),
+    };
+
+    const io = req.app.get('io');
+    if (io) io.to(`ride:${ride._id}`).emit('ride:location', payload);
+
+    res.json({
+      driverLocation: {
+        lng: coords.lng,
+        lat: coords.lat,
+        heading,
+        updatedAt: now,
+      },
+      trail: payload.trail,
+    });
+  } catch (err) {
+    console.error('[rides location POST]', err);
+    res.status(500).json({ error: 'Failed to update location' });
+  }
+});
+
+router.get('/:id/location', requireAuth, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id).select(
+      'parentId driverId pickupCoords dropoffCoords driverLocation trail pickup dropoff status',
+    );
+    if (!ride) return res.status(404).json({ error: 'Ride not found' });
+
+    const parentId = ride.parentId?.toString();
+    const driverId = ride.driverId?.toString();
+    if (
+      req.user.role !== 'admin' &&
+      parentId !== req.user.id &&
+      driverId !== req.user.id
+    ) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    res.json({
+      pickup: ride.pickup,
+      dropoff: ride.dropoff,
+      status: ride.status,
+      pickupCoords:
+        ride.pickupCoords?.lng != null
+          ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
+          : null,
+      dropoffCoords:
+        ride.dropoffCoords?.lng != null
+          ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
+          : null,
+      driverLocation:
+        ride.driverLocation?.lng != null
+          ? {
+              lng: ride.driverLocation.lng,
+              lat: ride.driverLocation.lat,
+              heading: ride.driverLocation.heading || 0,
+              updatedAt: ride.driverLocation.updatedAt,
+            }
+          : null,
+      trail: Array.isArray(ride.trail)
+        ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+        : [],
+    });
+  } catch (err) {
+    console.error('[rides location GET]', err);
+    res.status(500).json({ error: 'Failed to get location' });
   }
 });
 

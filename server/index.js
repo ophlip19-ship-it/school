@@ -107,25 +107,153 @@ io.use(async (socket, next) => {
   }
 });
 
+const TRAIL_MAX = 400;
+
+async function canAccessRide(socketUser, rideId) {
+  const ride = await Ride.findById(rideId);
+  if (!ride) return null;
+  const allowed =
+    socketUser.role === 'admin' ||
+    ride.parentId?.toString() === socketUser.id ||
+    ride.driverId?.toString() === socketUser.id;
+  return allowed ? ride : null;
+}
+
 io.on('connection', (socket) => {
   socket.on('chat:join', async ({ rideId }) => {
     if (!rideId) return;
     try {
-      const ride = await Ride.findById(rideId);
+      const ride = await canAccessRide(socket.user, rideId);
       if (!ride) return;
-      const allowed =
-        socket.user.role === 'admin' ||
-        ride.parentId?.toString() === socket.user.id ||
-        ride.driverId?.toString() === socket.user.id;
-      if (!allowed) return;
       socket.join(`ride:${rideId}`);
     } catch (err) {
       console.error('[socket chat:join]', err);
     }
   });
 
+  socket.on('ride:join', async ({ rideId }, ack) => {
+    if (!rideId) {
+      ack?.({ error: 'rideId required' });
+      return;
+    }
+    try {
+      const ride = await canAccessRide(socket.user, rideId);
+      if (!ride) {
+        ack?.({ error: 'Forbidden' });
+        return;
+      }
+      socket.join(`ride:${rideId}`);
+      ack?.({
+        ok: true,
+        driverLocation:
+          ride.driverLocation?.lng != null
+            ? {
+                lng: ride.driverLocation.lng,
+                lat: ride.driverLocation.lat,
+                heading: ride.driverLocation.heading || 0,
+                updatedAt: ride.driverLocation.updatedAt,
+              }
+            : null,
+        trail: Array.isArray(ride.trail)
+          ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+          : [],
+        pickupCoords:
+          ride.pickupCoords?.lng != null
+            ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
+            : null,
+        dropoffCoords:
+          ride.dropoffCoords?.lng != null
+            ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
+            : null,
+      });
+    } catch (err) {
+      console.error('[socket ride:join]', err);
+      ack?.({ error: 'Failed to join' });
+    }
+  });
+
   socket.on('chat:leave', ({ rideId }) => {
     if (rideId) socket.leave(`ride:${rideId}`);
+  });
+
+  socket.on('ride:leave', ({ rideId }) => {
+    if (rideId) socket.leave(`ride:${rideId}`);
+  });
+
+  /** Driver streams GPS — parents/admins in the ride room see blue trail updates */
+  socket.on('ride:location', async ({ rideId, lng, lat, heading = 0 }, ack) => {
+    try {
+      const nLng = Number(lng);
+      const nLat = Number(lat);
+      if (!rideId || !Number.isFinite(nLng) || !Number.isFinite(nLat)) {
+        ack?.({ error: 'Invalid location' });
+        return;
+      }
+
+      const ride = await Ride.findById(rideId);
+      if (!ride) {
+        ack?.({ error: 'Ride not found' });
+        return;
+      }
+
+      const isDriver = ride.driverId?.toString() === socket.user.id;
+      if (socket.user.role !== 'admin' && !isDriver) {
+        ack?.({ error: 'Only the assigned driver can update location' });
+        return;
+      }
+
+      const now = new Date();
+      ride.driverLocation = {
+        lng: nLng,
+        lat: nLat,
+        heading: Number(heading) || 0,
+        updatedAt: now,
+      };
+
+      const trail = Array.isArray(ride.trail) ? [...ride.trail] : [];
+      const last = trail[trail.length - 1];
+      const movedEnough =
+        !last ||
+        Math.abs(last.lng - nLng) > 0.00002 ||
+        Math.abs(last.lat - nLat) > 0.00002;
+      if (movedEnough) {
+        trail.push({ lng: nLng, lat: nLat, at: now });
+        ride.trail =
+          trail.length > TRAIL_MAX
+            ? trail.slice(trail.length - TRAIL_MAX)
+            : trail;
+      }
+
+      await ride.save();
+
+      await User.findByIdAndUpdate(socket.user.id, {
+        lastLocation: {
+          lng: nLng,
+          lat: nLat,
+          heading: Number(heading) || 0,
+          updatedAt: now,
+        },
+      });
+
+      const payload = {
+        rideId: ride._id.toString(),
+        lng: nLng,
+        lat: nLat,
+        heading: Number(heading) || 0,
+        updatedAt: now,
+        trail: ride.trail.map((p) => ({
+          lng: p.lng,
+          lat: p.lat,
+          at: p.at,
+        })),
+      };
+
+      io.to(`ride:${rideId}`).emit('ride:location', payload);
+      ack?.({ ok: true, ...payload });
+    } catch (err) {
+      console.error('[socket ride:location]', err);
+      ack?.({ error: 'Failed to update location' });
+    }
   });
 
   socket.on('chat:send', async ({ rideId, body }, ack) => {
@@ -134,16 +262,8 @@ io.on('connection', (socket) => {
         ack?.({ error: 'Invalid message' });
         return;
       }
-      const ride = await Ride.findById(rideId);
+      const ride = await canAccessRide(socket.user, rideId);
       if (!ride) {
-        ack?.({ error: 'Ride not found' });
-        return;
-      }
-      const allowed =
-        socket.user.role === 'admin' ||
-        ride.parentId?.toString() === socket.user.id ||
-        ride.driverId?.toString() === socket.user.id;
-      if (!allowed) {
         ack?.({ error: 'Forbidden' });
         return;
       }

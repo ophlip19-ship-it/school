@@ -23,6 +23,32 @@ export function mapRide(ride, extras = {}) {
     childName: r.childName,
     pickup: r.pickup,
     dropoff: r.dropoff,
+    pickupCoords:
+      r.pickupCoords?.lng != null && r.pickupCoords?.lat != null
+        ? { lng: r.pickupCoords.lng, lat: r.pickupCoords.lat }
+        : null,
+    dropoffCoords:
+      r.dropoffCoords?.lng != null && r.dropoffCoords?.lat != null
+        ? { lng: r.dropoffCoords.lng, lat: r.dropoffCoords.lat }
+        : null,
+    driverLocation:
+      r.driverLocation?.lng != null && r.driverLocation?.lat != null
+        ? {
+            lng: r.driverLocation.lng,
+            lat: r.driverLocation.lat,
+            heading: r.driverLocation.heading || 0,
+            updatedAt: r.driverLocation.updatedAt,
+          }
+        : null,
+    trail: Array.isArray(r.trail)
+      ? r.trail
+          .filter((p) => p?.lng != null && p?.lat != null)
+          .map((p) => ({
+            lng: p.lng,
+            lat: p.lat,
+            at: p.at,
+          }))
+      : [],
     date: r.rideDate,
     time: r.rideTime,
     tripType: r.tripType,

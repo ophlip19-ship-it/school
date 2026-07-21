@@ -63,6 +63,8 @@ export default function VehicleReview() {
         driverId: selectedDriver.id,
         pickup: draft.pickup,
         dropoff: draft.dropoff,
+        pickupCoords: draft.pickupCoords || null,
+        dropoffCoords: draft.dropoffCoords || null,
         date: draft.date,
         time: draft.time,
         tripType: draft.tripType || 'pickup',

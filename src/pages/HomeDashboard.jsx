@@ -14,9 +14,14 @@ import {
   Star,
   Shield,
   Camera,
+  Home,
+  Navigation,
+  School,
+  Map,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
+import { resolveDestination, resolvePickup } from '../lib/geo';
 
 function ChildAvatar({ child, size = 'md' }) {
   const dim =
@@ -52,6 +57,9 @@ export default function HomeDashboard() {
   const [instantError, setInstantError] = useState('');
   const [selectedChildId, setSelectedChildId] = useState(null);
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  const [pickupMode, setPickupMode] = useState('home'); // home | current
+  const [dropoffMode, setDropoffMode] = useState('school'); // school | custom
+  const [customDropoff, setCustomDropoff] = useState('');
 
   const children = user?.children || [];
 
@@ -99,19 +107,41 @@ export default function HomeDashboard() {
       return;
     }
 
+    if (dropoffMode === 'custom' && !customDropoff.trim()) {
+      setInstantError('Enter a destination address, or choose School.');
+      return;
+    }
+
     setInstantLoading(true);
     try {
+      const from = await resolvePickup({
+        mode: pickupMode === 'current' ? 'current' : 'home',
+        homeAddress: user?.homeAddress || `Home · pickup for ${child.name}`,
+        homeCoords: user?.homeCoords,
+      });
+      const to = await resolveDestination({
+        mode: dropoffMode === 'custom' ? 'custom' : 'school',
+        schoolName: child.school || school,
+        customLabel: customDropoff.trim(),
+      });
+
       const { ride } = await ridesApi.create({
         childId: child.id,
         driverId: selectedDriver.id,
         instant: true,
         tripType: 'pickup',
-        pickup: `Home · pickup for ${child.name}`,
-        dropoff: `${child.school || school} · main gate`,
+        pickup: from.label,
+        dropoff: to.label,
+        pickupCoords: { lng: from.lng, lat: from.lat },
+        dropoffCoords: { lng: to.lng, lat: to.lat },
       });
       navigate(`/payment?rideId=${ride.id}`);
     } catch (err) {
-      setInstantError(err.message || 'Could not start instant ride');
+      setInstantError(
+        err?.message?.includes('denied') || err?.code === 1
+          ? 'Location permission denied. Choose Home pickup or allow location access.'
+          : err.message || 'Could not start instant ride',
+      );
     } finally {
       setInstantLoading(false);
     }
@@ -163,6 +193,76 @@ export default function HomeDashboard() {
             ))}
           </div>
         )}
+
+        {/* Pickup & destination for driver */}
+        <div className="mt-4 space-y-3">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
+              Pickup location
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPickupMode('home')}
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                  pickupMode === 'home'
+                    ? 'bg-white font-semibold text-slate-900'
+                    : 'bg-white/10 text-white hover:bg-white/15'
+                }`}
+              >
+                <Home size={16} /> Home
+              </button>
+              <button
+                type="button"
+                onClick={() => setPickupMode('current')}
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                  pickupMode === 'current'
+                    ? 'bg-white font-semibold text-slate-900'
+                    : 'bg-white/10 text-white hover:bg-white/15'
+                }`}
+              >
+                <Navigation size={16} /> Current location
+              </button>
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
+              Destination
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDropoffMode('school')}
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                  dropoffMode === 'school'
+                    ? 'bg-white font-semibold text-slate-900'
+                    : 'bg-white/10 text-white hover:bg-white/15'
+                }`}
+              >
+                <School size={16} /> School
+              </button>
+              <button
+                type="button"
+                onClick={() => setDropoffMode('custom')}
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                  dropoffMode === 'custom'
+                    ? 'bg-white font-semibold text-slate-900'
+                    : 'bg-white/10 text-white hover:bg-white/15'
+                }`}
+              >
+                <Map size={16} /> Desired place
+              </button>
+            </div>
+            {dropoffMode === 'custom' && (
+              <input
+                value={customDropoff}
+                onChange={(e) => setCustomDropoff(e.target.value)}
+                placeholder="Enter destination address"
+                className="mt-2 w-full rounded-xl border-0 bg-white/95 px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              />
+            )}
+          </div>
+        </div>
 
         {/* Driver picker for instant ride */}
         <div className="mt-4">
