@@ -68,6 +68,7 @@ export const ridesApi = {
   get: (id) => api(`/rides/${id}`),
   create: (body) => api("/rides", { method: "POST", body }),
   accept: (id) => api(`/rides/${id}/accept`, { method: "POST", body: {} }),
+  reject: (id) => api(`/rides/${id}/reject`, { method: "POST", body: {} }),
   setStatus: (id, status) =>
     api(`/rides/${id}/status`, { method: "PATCH", body: { status } }),
   getLocation: (id) => api(`/rides/${id}/location`),

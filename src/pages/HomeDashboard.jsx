@@ -70,8 +70,12 @@ export default function HomeDashboard() {
   }, [children, selectedChildId]);
 
   useEffect(() => {
-    ridesApi.active().then(({ ride }) => setActiveRide(ride)).catch(() => {});
-    ridesApi.list().then(({ rides: list }) => setRides(list.slice(0, 5))).catch(() => {});
+    const load = () => {
+      ridesApi.active().then(({ ride }) => setActiveRide(ride)).catch(() => {});
+      ridesApi.list().then(({ rides: list }) => setRides(list.slice(0, 5))).catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 10000);
     driversApi
       .active()
       .then(({ drivers: list }) => {
@@ -80,6 +84,7 @@ export default function HomeDashboard() {
         if (firstAvailable) setSelectedDriverId(firstAvailable.id);
       })
       .catch(() => setDrivers([]));
+    return () => clearInterval(t);
   }, []);
 
   const childName = user?.childName || children[0]?.name || 'your child';
@@ -364,36 +369,62 @@ export default function HomeDashboard() {
       </div>
 
       {activeRide ? (
-        <div className="mb-8 rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-500 p-6 text-white shadow-lg shadow-emerald-600/20">
-          <p className="text-xs font-semibold uppercase tracking-widest text-emerald-100">
-            Active trip · {activeRide.status}
+        <div
+          className={`mb-8 rounded-3xl p-6 text-white shadow-lg ${
+            activeRide.status === 'requested'
+              ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20'
+              : activeRide.status === 'open'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-blue-600/20'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-500 shadow-emerald-600/20'
+          }`}
+        >
+          <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
+            {activeRide.status === 'requested'
+              ? 'Waiting for driver'
+              : activeRide.status === 'open'
+                ? 'Finding a driver'
+                : `Active trip · ${activeRide.status}`}
           </p>
           <h3 className="mt-2 text-2xl font-bold">{activeRide.childName}</h3>
-          <div className="mt-4 space-y-1 text-sm text-emerald-50">
-            <p>Driver: {activeRide.driverName || 'Waiting for driver…'}</p>
+          <div className="mt-4 space-y-1 text-sm text-white/90">
+            {activeRide.status === 'requested' ? (
+              <p>
+                Waiting for {activeRide.driverName || 'your chosen driver'} to
+                accept this ride…
+              </p>
+            ) : activeRide.status === 'open' ? (
+              <p>Looking for any available driver…</p>
+            ) : (
+              <p>Driver: {activeRide.driverName || 'Waiting for driver…'}</p>
+            )}
             <p className="flex items-center gap-2">
               <Clock size={16} /> {activeRide.date} · {activeRide.time}
             </p>
             <p className="flex items-center gap-2">
               <MapPin size={16} /> {activeRide.pickup}
             </p>
-            {activeRide.paymentStatus === 'paid' && (
-              <p>PIN: {activeRide.handoverPin}</p>
-            )}
+            {activeRide.paymentStatus === 'paid' &&
+              ['assigned', 'in_transit'].includes(activeRide.status) && (
+                <p>PIN: {activeRide.handoverPin}</p>
+              )}
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Link
-              to={`/live-tracking?rideId=${activeRide.id}`}
-              className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700"
-            >
-              Track live
-            </Link>
-            <Link
-              to={`/chat?rideId=${activeRide.id}`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
-            >
-              <MessageSquare size={16} /> Chat
-            </Link>
+            {['assigned', 'in_transit'].includes(activeRide.status) && (
+              <Link
+                to={`/live-tracking?rideId=${activeRide.id}`}
+                className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700"
+              >
+                Track live
+              </Link>
+            )}
+            {activeRide.driverId && (
+              <Link
+                to={`/chat?rideId=${activeRide.id}`}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
+              >
+                <MessageSquare size={16} /> Chat
+              </Link>
+            )}
             {activeRide.paymentStatus !== 'paid' && (
               <Link
                 to={`/payment?rideId=${activeRide.id}`}

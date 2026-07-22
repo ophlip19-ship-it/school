@@ -31,7 +31,7 @@ async function rideStatsForUser(userId, role) {
     Ride.countDocuments({ ...filter, status: 'completed' }),
     Ride.countDocuments({
       ...filter,
-      status: { $in: ['open', 'assigned', 'in_transit'] },
+      status: { $in: ['open', 'requested', 'assigned', 'in_transit'] },
     }),
   ]);
   return { totalRides: total, completedRides: completed, activeRides: active };
@@ -79,7 +79,7 @@ router.get('/stats', async (_req, res) => {
       Child.countDocuments(),
       Ride.countDocuments({ status: 'completed' }),
       Ride.countDocuments({
-        status: { $in: ['open', 'assigned', 'in_transit'] },
+        status: { $in: ['open', 'requested', 'assigned', 'in_transit'] },
       }),
       Payment.aggregate([
         { $match: { status: 'succeeded' } },

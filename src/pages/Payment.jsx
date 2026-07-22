@@ -296,7 +296,12 @@ export default function Payment() {
         }
 
         if (r.paymentStatus === 'paid' || intentRes?.alreadyPaid) {
-          navigate(`/live-tracking?rideId=${r.id}`, { replace: true });
+          // Live map only after a driver has accepted
+          if (['assigned', 'in_transit'].includes(r.status)) {
+            navigate(`/live-tracking?rideId=${r.id}`, { replace: true });
+          } else {
+            navigate('/dashboard', { replace: true });
+          }
         }
       } catch (err) {
         setError(err.message || 'Failed to load payment');
@@ -306,8 +311,18 @@ export default function Payment() {
     })();
   }, [rideId, navigate]);
 
-  const onPaid = () => {
-    navigate(`/live-tracking?rideId=${rideId}`);
+  const onPaid = async () => {
+    try {
+      const { ride: r } = await ridesApi.get(rideId);
+      if (r && ['assigned', 'in_transit'].includes(r.status)) {
+        navigate(`/live-tracking?rideId=${rideId}`, { replace: true });
+      } else {
+        // requested / open — wait for driver on parent dashboard
+        navigate('/dashboard', { replace: true });
+      }
+    } catch {
+      navigate('/dashboard', { replace: true });
+    }
   };
 
   if (loading) {
@@ -337,12 +352,17 @@ export default function Payment() {
 
       <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         {ride.driverName && (
-          <div className="mb-3 flex justify-between text-sm">
-            <span className="text-slate-500">Driver</span>
-            <span className="font-medium text-slate-900">
-              {ride.driverName}
-              {ride.vehiclePlate ? ` · ${ride.vehiclePlate}` : ''}
-            </span>
+          <div className="mb-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Driver</span>
+              <span className="font-medium text-slate-900">
+                {ride.driverName}
+                {ride.vehiclePlate ? ` · ${ride.vehiclePlate}` : ''}
+              </span>
+            </div>
+            <p className="mt-1 text-right text-xs text-amber-700">
+              After payment they can accept or decline your request
+            </p>
           </div>
         )}
         <div className="flex justify-between text-sm">

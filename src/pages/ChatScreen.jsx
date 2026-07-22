@@ -32,7 +32,9 @@ export default function ChatScreen() {
           else {
             const { rides } = await ridesApi.list();
             const chatable = rides.find((r) =>
-              ['open', 'assigned', 'in_transit', 'completed'].includes(r.status),
+              ['open', 'requested', 'assigned', 'in_transit', 'completed'].includes(
+                r.status,
+              ),
             );
             if (chatable) id = chatable.id;
           }

@@ -21,9 +21,10 @@ async function markRidePaid(rideId, userId, amountCents, provider, providerRef) 
     providerRef: providerRef || null,
   });
 
-  // Parent-picked driver → assigned immediately; otherwise open for any driver
+  // Parent-picked driver → requested (driver must accept/reject);
+  // no preferred driver → open pool for any driver
   const existing = await Ride.findById(rideId).select('driverId');
-  const nextStatus = existing?.driverId ? 'assigned' : 'open';
+  const nextStatus = existing?.driverId ? 'requested' : 'open';
 
   await Ride.findByIdAndUpdate(rideId, {
     paymentStatus: 'paid',

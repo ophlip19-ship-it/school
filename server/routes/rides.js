@@ -28,12 +28,14 @@ router.get('/', requireAuth, async (req, res) => {
     if (req.user.role === 'parent') {
       rides = await findRidesPopulated({ parentId: req.user.id });
     } else if (req.user.role === 'driver') {
-      // Only paid / active work — hide unpaid pending_payment bookings
+      // Paid work: open pool, preferred requests, assigned/in-progress, history
       rides = await findRidesPopulated({
         $or: [
           {
             driverId: req.user.id,
-            status: { $in: ['assigned', 'in_transit', 'completed', 'open'] },
+            status: {
+              $in: ['requested', 'assigned', 'in_transit', 'completed', 'open'],
+            },
           },
           { status: 'open', driverId: null },
         ],
@@ -50,9 +52,12 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.get('/available', requireAuth, requireRole('driver'), async (req, res) => {
   try {
+    // Open pool rides + preferred requests for this driver
     const rides = await findRidesPopulated({
-      status: 'open',
-      driverId: null,
+      $or: [
+        { status: 'open', driverId: null },
+        { status: 'requested', driverId: req.user.id },
+      ],
     });
     res.json({ rides: rides.map((r) => mapRide(r)) });
   } catch (err) {
@@ -67,7 +72,7 @@ router.get('/active', requireAuth, async (req, res) => {
     if (req.user.role === 'parent') {
       ride = await Ride.findOne({
         parentId: req.user.id,
-        status: { $in: ['open', 'assigned', 'in_transit'] },
+        status: { $in: ['open', 'requested', 'assigned', 'in_transit'] },
       })
         .sort({ updatedAt: -1 })
         .populate('parentId', 'name phone')
@@ -377,8 +382,17 @@ router.post('/:id/accept', requireAuth, requireRole('driver'), async (req, res) 
   try {
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ error: 'Ride not found' });
-    if (ride.status !== 'open' || ride.driverId) {
-      return res.status(400).json({ error: 'Ride is not available' });
+    if (ride.paymentStatus !== 'paid') {
+      return res.status(400).json({ error: 'Ride is not paid yet' });
+    }
+
+    const isOpenPool = ride.status === 'open' && !ride.driverId;
+    const isPreferredRequest =
+      ride.status === 'requested' &&
+      ride.driverId?.toString() === req.user.id;
+
+    if (!isOpenPool && !isPreferredRequest) {
+      return res.status(400).json({ error: 'Ride is not available to accept' });
     }
 
     ride.driverId = req.user.id;
@@ -390,6 +404,33 @@ router.post('/:id/accept', requireAuth, requireRole('driver'), async (req, res) 
   } catch (err) {
     console.error('[rides accept]', err);
     res.status(500).json({ error: 'Failed to accept ride' });
+  }
+});
+
+/** Preferred driver declines — ride returns to open pool for any driver */
+router.post('/:id/reject', requireAuth, requireRole('driver'), async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id);
+    if (!ride) return res.status(404).json({ error: 'Ride not found' });
+
+    if (
+      ride.status !== 'requested' ||
+      ride.driverId?.toString() !== req.user.id
+    ) {
+      return res.status(400).json({
+        error: 'Only preferred ride requests assigned to you can be declined',
+      });
+    }
+
+    ride.driverId = null;
+    ride.status = 'open';
+    await ride.save();
+
+    const updated = await findRidePopulated({ _id: ride._id });
+    res.json({ ride: mapRide(updated) });
+  } catch (err) {
+    console.error('[rides reject]', err);
+    res.status(500).json({ error: 'Failed to decline ride' });
   }
 });
 
@@ -408,6 +449,15 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
     const isDriver = ride.driverId?.toString() === req.user.id;
     if (req.user.role !== 'admin' && !isParent && !isDriver) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Drivers may only advance assigned/in_transit rides they own
+    if (req.user.role === 'driver' && status !== 'cancelled') {
+      if (!isDriver || !['assigned', 'in_transit'].includes(ride.status)) {
+        return res.status(400).json({
+          error: 'Accept the ride request before starting the trip',
+        });
+      }
     }
 
     ride.status = status;

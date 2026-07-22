@@ -37,10 +37,12 @@ export default function VehicleReview() {
 
   const selectedDriver =
     drivers.find((d) => d.id === selectedDriverId) || null;
-  const availableDrivers = drivers.filter((d) => d.available);
-  // Scheduled rides: show all active drivers (available first); parent may pick any
-  const selectableDrivers =
-    availableDrivers.length > 0 ? availableDrivers : drivers;
+  // Scheduled rides: parent may pick available or busy drivers (busy first still sorted available-first)
+  const selectableDrivers = [...drivers].sort((a, b) => {
+    if (a.available !== b.available) return a.available ? -1 : 1;
+    return 0;
+  });
+  const availableCount = drivers.filter((d) => d.available).length;
 
   const handleConfirm = async () => {
     if (!draft.childId || !draft.pickup || !draft.dropoff || !draft.date || !draft.time) {
@@ -86,17 +88,17 @@ export default function VehicleReview() {
       </Link>
       <h1 className="mt-4 text-3xl font-bold text-slate-900">Choose driver</h1>
       <p className="mt-2 text-slate-600">
-        Pick any available driver, review the trip, then pay securely.
+        Pick any driver — available or on a trip. They will accept or decline after you pay.
       </p>
 
       {/* Driver list */}
       <div className="mt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Available drivers
+            All drivers
           </h2>
           <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            {selectableDrivers.length} ready
+            {availableCount} free · {selectableDrivers.length} total
           </span>
         </div>
 

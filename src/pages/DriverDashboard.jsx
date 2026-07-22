@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Clock, AlertCircle, Navigation, Zap } from 'lucide-react';
+import { MapPin, Clock, AlertCircle, Navigation, Zap, UserCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, formatMoney } from '../lib/api';
 
@@ -10,6 +10,7 @@ export default function DriverDashboard() {
   const [activeRide, setActiveRide] = useState(null);
   const [available, setAvailable] = useState([]);
   const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
 
   const load = async () => {
     try {
@@ -30,14 +31,102 @@ export default function DriverDashboard() {
     return () => clearInterval(t);
   }, []);
 
+  const requests = available.filter((r) => r.status === 'requested');
+  const openPool = available.filter((r) => r.status === 'open');
+
   const accept = async (id) => {
+    setBusyId(id);
+    setError('');
     try {
       await ridesApi.accept(id);
       await load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusyId(null);
     }
   };
+
+  const reject = async (id) => {
+    setBusyId(id);
+    setError('');
+    try {
+      await ridesApi.reject(id);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const RideCard = ({ ride, preferred }) => (
+    <div
+      key={ride.id}
+      className={`rounded-2xl border-2 bg-white p-4 ${
+        preferred
+          ? 'border-amber-300 bg-gradient-to-br from-amber-50 to-white'
+          : 'border-slate-200'
+      }`}
+    >
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          {preferred && (
+            <p className="mb-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+              <UserCheck size={12} /> Requested for you
+            </p>
+          )}
+          <h3 className="font-bold text-slate-900">{ride.childName}</h3>
+        </div>
+        <span className="shrink-0 text-sm font-bold text-emerald-600">
+          {formatMoney(ride.fareCents)}
+        </span>
+      </div>
+      <div className="mb-4 space-y-1 text-sm text-slate-600">
+        <p className="flex items-center gap-2">
+          <MapPin size={14} className="text-blue-600" /> {ride.pickup}
+        </p>
+        <p className="flex items-center gap-2">
+          <Navigation size={14} className="text-emerald-600" /> {ride.dropoff}
+        </p>
+        <p className="flex items-center gap-2">
+          <Clock size={14} /> {ride.date} · {ride.time}
+        </p>
+        {ride.parentName && (
+          <p className="text-xs text-slate-500">Parent: {ride.parentName}</p>
+        )}
+      </div>
+      {preferred ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={!online || busyId === ride.id}
+            onClick={() => accept(ride.id)}
+            className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {busyId === ride.id ? '…' : 'Accept'}
+          </button>
+          <button
+            type="button"
+            disabled={!online || busyId === ride.id}
+            onClick={() => reject(ride.id)}
+            className="flex-1 rounded-xl border border-slate-300 bg-white py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Decline
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={!online || busyId === ride.id}
+          onClick={() => accept(ride.id)}
+          className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {busyId === ride.id ? '…' : 'Accept'}
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="mx-auto max-w-lg p-6 pb-32">
@@ -45,7 +134,9 @@ export default function DriverDashboard() {
         <h1 className="text-3xl font-bold text-slate-900">
           Welcome, {user?.name || user?.driverName || 'Driver'}
         </h1>
-        <p className="mt-2 text-slate-600">Live open rides from the API</p>
+        <p className="mt-2 text-slate-600">
+          Preferred requests and open paid rides
+        </p>
       </div>
 
       <button
@@ -92,9 +183,27 @@ export default function DriverDashboard() {
         </div>
       )}
 
+      {requests.length > 0 && (
+        <div className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-slate-900">
+              Ride requests ({requests.length})
+            </h2>
+          </div>
+          <p className="mb-3 text-sm text-slate-600">
+            A parent chose you. Accept to take the trip, or decline to release it to the open pool.
+          </p>
+          <div className="space-y-3">
+            {requests.map((ride) => (
+              <RideCard key={ride.id} ride={ride} preferred />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-xl font-bold text-slate-900">
-          Available rides ({available.length})
+          Open pool ({openPool.length})
         </h2>
         <Link to="/driver/rides" className="text-sm font-semibold text-emerald-600">
           See all
@@ -102,38 +211,15 @@ export default function DriverDashboard() {
       </div>
 
       <div className="mb-8 space-y-3">
-        {available.map((ride) => (
-          <div key={ride.id} className="rounded-2xl border-2 border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-start justify-between">
-              <h3 className="font-bold text-slate-900">{ride.childName}</h3>
-              <span className="text-sm font-bold text-emerald-600">
-                {formatMoney(ride.fareCents)}
-              </span>
-            </div>
-            <div className="mb-4 space-y-1 text-sm text-slate-600">
-              <p className="flex items-center gap-2">
-                <MapPin size={14} className="text-blue-600" /> {ride.pickup}
-              </p>
-              <p className="flex items-center gap-2">
-                <Navigation size={14} className="text-emerald-600" /> {ride.dropoff}
-              </p>
-              <p className="flex items-center gap-2">
-                <Clock size={14} /> {ride.date} · {ride.time}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={!online}
-              onClick={() => accept(ride.id)}
-              className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              Accept
-            </button>
-          </div>
+        {openPool.map((ride) => (
+          <RideCard key={ride.id} ride={ride} preferred={false} />
         ))}
-        {available.length === 0 && (
+        {openPool.length === 0 && (
           <p className="text-sm text-slate-500">
-            No open paid rides right now. Parents must pay before rides appear here.
+            No open pool rides right now.
+            {requests.length === 0
+              ? ' Parents must pay before rides appear here.'
+              : ''}
           </p>
         )}
       </div>
