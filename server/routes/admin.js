@@ -5,6 +5,7 @@ import Child from '../models/Child.js';
 import Ride from '../models/Ride.js';
 import Payment from '../models/Payment.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { mapTransitRide } from '../utils/mappers.js';
 
 const router = Router();
 
@@ -286,6 +287,33 @@ router.post('/drivers/:id/unsuspend', async (req, res) => {
   } catch (err) {
     console.error('[admin/drivers unsuspend]', err);
     res.status(500).json({ error: 'Failed to unsuspend driver' });
+  }
+});
+
+/**
+ * All drivers currently in transit with live location, trail, route anchors, and feed.
+ * Used by the admin fleet / transit map.
+ */
+router.get('/transit', async (_req, res) => {
+  try {
+    const rides = await Ride.find({
+      status: 'in_transit',
+      locationSharing: true,
+      driverId: { $ne: null },
+    })
+      .populate('parentId', 'name phone')
+      .populate('driverId', 'name phone vehiclePlate')
+      .sort({ pickedUpAt: -1, updatedAt: -1 })
+      .lean();
+
+    res.json({
+      rides: rides.map((r) => mapTransitRide(r)),
+      count: rides.length,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[admin/transit]', err);
+    res.status(500).json({ error: 'Failed to load transit rides' });
   }
 });
 

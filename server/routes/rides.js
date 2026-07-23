@@ -3,7 +3,12 @@ import Ride from '../models/Ride.js';
 import Child from '../models/Child.js';
 import User from '../models/User.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { mapRide } from '../utils/mappers.js';
+import {
+  mapRide,
+  mapRideForViewer,
+  pushTransitFeed,
+  mapTransitRide,
+} from '../utils/mappers.js';
 
 const router = Router();
 
@@ -43,7 +48,7 @@ router.get('/', requireAuth, async (req, res) => {
     } else {
       rides = await findRidesPopulated({}, { limit: 100 });
     }
-    res.json({ rides: rides.map((r) => mapRide(r)) });
+    res.json({ rides: rides.map((r) => mapRideForViewer(r, req.user)) });
   } catch (err) {
     console.error('[rides GET]', err);
     res.status(500).json({ error: 'Failed to list rides' });
@@ -86,7 +91,7 @@ router.get('/active', requireAuth, async (req, res) => {
         .populate('parentId', 'name phone')
         .populate('driverId', 'name phone vehiclePlate');
     }
-    res.json({ ride: mapRide(ride) });
+    res.json({ ride: mapRideForViewer(ride, req.user) });
   } catch (err) {
     console.error('[rides/active]', err);
     res.status(500).json({ error: 'Failed to get active ride' });
@@ -109,7 +114,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    res.json({ ride: mapRide(ride) });
+    res.json({ ride: mapRideForViewer(ride, req.user) });
   } catch (err) {
     console.error('[rides GET :id]', err);
     res.status(500).json({ error: 'Failed to get ride' });
@@ -247,7 +252,11 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
   }
 });
 
-/** Driver (or admin) pushes GPS; parents read via GET / map socket */
+/**
+ * Driver (or admin) pushes GPS.
+ * Location is only shared with the parent after pickup is confirmed
+ * (status in_transit + locationSharing). Admin always receives live transit updates.
+ */
 router.post('/:id/location', requireAuth, async (req, res) => {
   try {
     const coords = parseCoords(req.body);
@@ -264,6 +273,21 @@ router.post('/:id/location', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Only the assigned driver can update location' });
     }
 
+    // Stop accepting GPS after dropoff / if not yet picked up
+    if (ride.status === 'completed' || ride.status === 'cancelled') {
+      return res.status(400).json({
+        error: 'Location sharing has ended for this trip',
+        locationSharing: false,
+      });
+    }
+    if (ride.status !== 'in_transit' || !ride.locationSharing) {
+      return res.status(400).json({
+        error: 'Confirm pickup before sharing location with the parent',
+        locationSharing: false,
+        status: ride.status,
+      });
+    }
+
     const now = new Date();
     ride.driverLocation = {
       lng: coords.lng,
@@ -272,7 +296,7 @@ router.post('/:id/location', requireAuth, async (req, res) => {
       updatedAt: now,
     };
 
-    const trail = Array.isArray(ride.trail) ? ride.trail : [];
+    const trail = Array.isArray(ride.trail) ? [...ride.trail] : [];
     const last = trail[trail.length - 1];
     const movedEnough =
       !last ||
@@ -280,16 +304,24 @@ router.post('/:id/location', requireAuth, async (req, res) => {
       Math.abs(last.lat - coords.lat) > 0.00002;
     if (movedEnough) {
       trail.push({ lng: coords.lng, lat: coords.lat, at: now });
-      if (trail.length > TRAIL_MAX) {
-        ride.trail = trail.slice(trail.length - TRAIL_MAX);
-      } else {
-        ride.trail = trail;
+      ride.trail =
+        trail.length > TRAIL_MAX
+          ? trail.slice(trail.length - TRAIL_MAX)
+          : trail;
+
+      // Throttle feed progress notes (~every ~300m of trail points, or every 8th point)
+      if (trail.length === 1 || trail.length % 8 === 0) {
+        pushTransitFeed(
+          ride,
+          'progress',
+          `En route to drop-off · ${ride.dropoff}`,
+          coords,
+        );
       }
     }
 
     await ride.save();
 
-    // Keep driver's last known position for live maps
     await User.findByIdAndUpdate(req.user.id, {
       lastLocation: {
         lng: coords.lng,
@@ -299,21 +331,51 @@ router.post('/:id/location', requireAuth, async (req, res) => {
       },
     });
 
+    const trailPayload = ride.trail.map((p) => ({
+      lng: p.lng,
+      lat: p.lat,
+      at: p.at,
+    }));
+
     const payload = {
       rideId: ride._id.toString(),
       lng: coords.lng,
       lat: coords.lat,
       heading,
       updatedAt: now,
-      trail: ride.trail.map((p) => ({
-        lng: p.lng,
-        lat: p.lat,
-        at: p.at,
+      locationSharing: true,
+      status: ride.status,
+      trail: trailPayload,
+      transitFeed: (ride.transitFeed || []).map((e) => ({
+        type: e.type,
+        message: e.message,
+        at: e.at,
+        lng: e.lng ?? null,
+        lat: e.lat ?? null,
       })),
     };
 
     const io = req.app.get('io');
-    if (io) io.to(`ride:${ride._id}`).emit('ride:location', payload);
+    if (io) {
+      // Parent / assigned driver room — only while sharing
+      io.to(`ride:${ride._id}`).emit('ride:location', payload);
+      // Admin fleet map
+      io.to('admin:transit').emit('transit:location', {
+        ...payload,
+        childName: ride.childName,
+        driverId: ride.driverId?.toString(),
+        pickup: ride.pickup,
+        dropoff: ride.dropoff,
+        pickupCoords:
+          ride.pickupCoords?.lng != null
+            ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
+            : null,
+        dropoffCoords:
+          ride.dropoffCoords?.lng != null
+            ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
+            : null,
+      });
+    }
 
     res.json({
       driverLocation: {
@@ -322,7 +384,9 @@ router.post('/:id/location', requireAuth, async (req, res) => {
         heading,
         updatedAt: now,
       },
-      trail: payload.trail,
+      trail: trailPayload,
+      locationSharing: true,
+      transitFeed: payload.transitFeed,
     });
   } catch (err) {
     console.error('[rides location POST]', err);
@@ -333,24 +397,31 @@ router.post('/:id/location', requireAuth, async (req, res) => {
 router.get('/:id/location', requireAuth, async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.id).select(
-      'parentId driverId pickupCoords dropoffCoords driverLocation trail pickup dropoff status',
+      'parentId driverId pickupCoords dropoffCoords driverLocation trail transitFeed pickup dropoff status locationSharing pickedUpAt deliveredAt',
     );
     if (!ride) return res.status(404).json({ error: 'Ride not found' });
 
     const parentId = ride.parentId?.toString();
     const driverId = ride.driverId?.toString();
-    if (
-      req.user.role !== 'admin' &&
-      parentId !== req.user.id &&
-      driverId !== req.user.id
-    ) {
+    const isParent = parentId === req.user.id;
+    const isDriver = driverId === req.user.id;
+    if (req.user.role !== 'admin' && !isParent && !isDriver) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+
+    // Parents only see live GPS after driver confirms pickup
+    const canSeeLive =
+      req.user.role === 'admin' ||
+      isDriver ||
+      (isParent && ride.locationSharing && ride.status === 'in_transit');
 
     res.json({
       pickup: ride.pickup,
       dropoff: ride.dropoff,
       status: ride.status,
+      locationSharing: !!ride.locationSharing,
+      pickedUpAt: ride.pickedUpAt || null,
+      deliveredAt: ride.deliveredAt || null,
       pickupCoords:
         ride.pickupCoords?.lng != null
           ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
@@ -360,7 +431,7 @@ router.get('/:id/location', requireAuth, async (req, res) => {
           ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
           : null,
       driverLocation:
-        ride.driverLocation?.lng != null
+        canSeeLive && ride.driverLocation?.lng != null
           ? {
               lng: ride.driverLocation.lng,
               lat: ride.driverLocation.lat,
@@ -368,8 +439,18 @@ router.get('/:id/location', requireAuth, async (req, res) => {
               updatedAt: ride.driverLocation.updatedAt,
             }
           : null,
-      trail: Array.isArray(ride.trail)
-        ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+      trail:
+        canSeeLive && Array.isArray(ride.trail)
+          ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+          : [],
+      transitFeed: Array.isArray(ride.transitFeed)
+        ? ride.transitFeed.map((e) => ({
+            type: e.type,
+            message: e.message,
+            at: e.at,
+            lng: e.lng ?? null,
+            lat: e.lat ?? null,
+          }))
         : [],
     });
   } catch (err) {
@@ -460,11 +541,104 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
       }
     }
 
-    ride.status = status;
+    // Confirm pickup → begin location sharing with parent
+    if (status === 'in_transit') {
+      if (!['assigned', 'in_transit'].includes(ride.status)) {
+        return res.status(400).json({
+          error: 'Ride must be assigned before confirming pickup',
+        });
+      }
+      if (ride.status !== 'in_transit') {
+        ride.status = 'in_transit';
+        ride.locationSharing = true;
+        ride.pickedUpAt = new Date();
+        // Seed trail at pickup so the blue path starts cleanly
+        if (
+          ride.pickupCoords?.lng != null &&
+          (!ride.trail || ride.trail.length === 0)
+        ) {
+          ride.trail = [
+            {
+              lng: ride.pickupCoords.lng,
+              lat: ride.pickupCoords.lat,
+              at: ride.pickedUpAt,
+            },
+          ];
+          ride.driverLocation = {
+            lng: ride.pickupCoords.lng,
+            lat: ride.pickupCoords.lat,
+            heading: 0,
+            updatedAt: ride.pickedUpAt,
+          };
+        }
+        pushTransitFeed(
+          ride,
+          'pickup_confirmed',
+          `Pickup confirmed for ${ride.childName}. Live location sharing started.`,
+          ride.pickupCoords?.lng != null
+            ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
+            : null,
+        );
+      }
+    } else if (status === 'completed') {
+      // Dropoff / delivered → stop sharing immediately
+      ride.status = 'completed';
+      ride.locationSharing = false;
+      ride.deliveredAt = new Date();
+      pushTransitFeed(
+        ride,
+        'delivered',
+        `Drop-off complete · ${ride.childName} delivered to ${ride.dropoff}. Location sharing stopped.`,
+        ride.driverLocation?.lng != null
+          ? { lng: ride.driverLocation.lng, lat: ride.driverLocation.lat }
+          : ride.dropoffCoords?.lng != null
+            ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
+            : null,
+      );
+    } else if (status === 'cancelled') {
+      ride.status = 'cancelled';
+      ride.locationSharing = false;
+      pushTransitFeed(ride, 'cancelled', 'Trip cancelled. Location sharing stopped.');
+    } else {
+      ride.status = status;
+      if (status === 'assigned') {
+        ride.locationSharing = false;
+      }
+    }
+
     await ride.save();
 
     const updated = await findRidePopulated({ _id: ride._id });
-    res.json({ ride: mapRide(updated) });
+    const mapped = mapRide(updated);
+    const io = req.app.get('io');
+    if (io) {
+      const statusPayload = {
+        rideId: mapped.id,
+        status: mapped.status,
+        locationSharing: mapped.locationSharing,
+        pickedUpAt: mapped.pickedUpAt,
+        deliveredAt: mapped.deliveredAt,
+        transitFeed: mapped.transitFeed,
+        driverLocation: mapped.locationSharing ? mapped.driverLocation : null,
+        trail: mapped.locationSharing ? mapped.trail : [],
+      };
+      io.to(`ride:${mapped.id}`).emit('ride:status', statusPayload);
+
+      if (status === 'in_transit' && mapped.locationSharing) {
+        io.to('admin:transit').emit('transit:started', mapTransitRide(updated));
+      }
+      if (status === 'completed' || status === 'cancelled') {
+        io.to('admin:transit').emit('transit:ended', {
+          rideId: mapped.id,
+          status: mapped.status,
+          locationSharing: false,
+          transitFeed: mapped.transitFeed,
+          deliveredAt: mapped.deliveredAt,
+        });
+      }
+    }
+
+    res.json({ ride: mapped });
   } catch (err) {
     console.error('[rides status]', err);
     res.status(500).json({ error: 'Failed to update status' });

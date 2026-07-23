@@ -9,7 +9,7 @@ import { JWT_SECRET } from './middleware/auth.js';
 import User from './models/User.js';
 import Ride from './models/Ride.js';
 import Message from './models/Message.js';
-import { mapMessage } from './utils/mappers.js';
+import { mapMessage, mapTransitRide, pushTransitFeed } from './utils/mappers.js';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
 import ridesRoutes from './routes/rides.js';
@@ -143,10 +143,24 @@ io.on('connection', (socket) => {
         return;
       }
       socket.join(`ride:${rideId}`);
+
+      const isParent = ride.parentId?.toString() === socket.user.id;
+      const isDriver = ride.driverId?.toString() === socket.user.id;
+      const isAdmin = socket.user.role === 'admin';
+      // Parent only receives live GPS after pickup confirmation
+      const canSeeLive =
+        isAdmin ||
+        isDriver ||
+        (isParent && ride.locationSharing && ride.status === 'in_transit');
+
       ack?.({
         ok: true,
+        status: ride.status,
+        locationSharing: !!ride.locationSharing,
+        pickedUpAt: ride.pickedUpAt || null,
+        deliveredAt: ride.deliveredAt || null,
         driverLocation:
-          ride.driverLocation?.lng != null
+          canSeeLive && ride.driverLocation?.lng != null
             ? {
                 lng: ride.driverLocation.lng,
                 lat: ride.driverLocation.lat,
@@ -154,8 +168,18 @@ io.on('connection', (socket) => {
                 updatedAt: ride.driverLocation.updatedAt,
               }
             : null,
-        trail: Array.isArray(ride.trail)
-          ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+        trail:
+          canSeeLive && Array.isArray(ride.trail)
+            ? ride.trail.map((p) => ({ lng: p.lng, lat: p.lat, at: p.at }))
+            : [],
+        transitFeed: Array.isArray(ride.transitFeed)
+          ? ride.transitFeed.map((e) => ({
+              type: e.type,
+              message: e.message,
+              at: e.at,
+              lng: e.lng ?? null,
+              lat: e.lat ?? null,
+            }))
           : [],
         pickupCoords:
           ride.pickupCoords?.lng != null
@@ -172,6 +196,37 @@ io.on('connection', (socket) => {
     }
   });
 
+  /** Admin fleet map — all in-transit drivers */
+  socket.on('admin:transit:join', async (_payload, ack) => {
+    try {
+      if (socket.user.role !== 'admin') {
+        ack?.({ error: 'Forbidden' });
+        return;
+      }
+      socket.join('admin:transit');
+      const rides = await Ride.find({
+        status: 'in_transit',
+        locationSharing: true,
+        driverId: { $ne: null },
+      })
+        .populate('parentId', 'name phone')
+        .populate('driverId', 'name phone vehiclePlate')
+        .sort({ pickedUpAt: -1, updatedAt: -1 });
+
+      ack?.({
+        ok: true,
+        rides: rides.map((r) => mapTransitRide(r)),
+      });
+    } catch (err) {
+      console.error('[socket admin:transit:join]', err);
+      ack?.({ error: 'Failed to join transit room' });
+    }
+  });
+
+  socket.on('admin:transit:leave', () => {
+    socket.leave('admin:transit');
+  });
+
   socket.on('chat:leave', ({ rideId }) => {
     if (rideId) socket.leave(`ride:${rideId}`);
   });
@@ -180,7 +235,10 @@ io.on('connection', (socket) => {
     if (rideId) socket.leave(`ride:${rideId}`);
   });
 
-  /** Driver streams GPS — parents/admins in the ride room see blue trail updates */
+  /**
+   * Driver streams GPS only after confirming pickup (in_transit + locationSharing).
+   * Broadcast to parent ride room + admin transit map.
+   */
   socket.on('ride:location', async ({ rideId, lng, lat, heading = 0 }, ack) => {
     try {
       const nLng = Number(lng);
@@ -199,6 +257,19 @@ io.on('connection', (socket) => {
       const isDriver = ride.driverId?.toString() === socket.user.id;
       if (socket.user.role !== 'admin' && !isDriver) {
         ack?.({ error: 'Only the assigned driver can update location' });
+        return;
+      }
+
+      if (ride.status === 'completed' || ride.status === 'cancelled') {
+        ack?.({ error: 'Location sharing has ended', locationSharing: false });
+        return;
+      }
+      if (ride.status !== 'in_transit' || !ride.locationSharing) {
+        ack?.({
+          error: 'Confirm pickup before sharing location with the parent',
+          locationSharing: false,
+          status: ride.status,
+        });
         return;
       }
 
@@ -222,6 +293,14 @@ io.on('connection', (socket) => {
           trail.length > TRAIL_MAX
             ? trail.slice(trail.length - TRAIL_MAX)
             : trail;
+        if (trail.length === 1 || trail.length % 8 === 0) {
+          pushTransitFeed(
+            ride,
+            'progress',
+            `En route to drop-off · ${ride.dropoff}`,
+            { lng: nLng, lat: nLat },
+          );
+        }
       }
 
       await ride.save();
@@ -241,14 +320,38 @@ io.on('connection', (socket) => {
         lat: nLat,
         heading: Number(heading) || 0,
         updatedAt: now,
+        locationSharing: true,
+        status: ride.status,
         trail: ride.trail.map((p) => ({
           lng: p.lng,
           lat: p.lat,
           at: p.at,
         })),
+        transitFeed: (ride.transitFeed || []).map((e) => ({
+          type: e.type,
+          message: e.message,
+          at: e.at,
+          lng: e.lng ?? null,
+          lat: e.lat ?? null,
+        })),
       };
 
       io.to(`ride:${rideId}`).emit('ride:location', payload);
+      io.to('admin:transit').emit('transit:location', {
+        ...payload,
+        childName: ride.childName,
+        driverId: ride.driverId?.toString(),
+        pickup: ride.pickup,
+        dropoff: ride.dropoff,
+        pickupCoords:
+          ride.pickupCoords?.lng != null
+            ? { lng: ride.pickupCoords.lng, lat: ride.pickupCoords.lat }
+            : null,
+        dropoffCoords:
+          ride.dropoffCoords?.lng != null
+            ? { lng: ride.dropoffCoords.lng, lat: ride.dropoffCoords.lat }
+            : null,
+      });
       ack?.({ ok: true, ...payload });
     } catch (err) {
       console.error('[socket ride:location]', err);

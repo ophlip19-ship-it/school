@@ -103,6 +103,8 @@ export const adminApi = {
     api(`/admin/drivers/${id}/suspend`, { method: "POST", body: {} }),
   unsuspendDriver: (id) =>
     api(`/admin/drivers/${id}/unsuspend`, { method: "POST", body: {} }),
+  /** All drivers currently in transit with live location + feed */
+  transit: () => api("/admin/transit"),
 };
 
 export function formatMoney(cents, currency = "NGN") {
