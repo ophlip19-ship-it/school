@@ -13,7 +13,11 @@ export default function Navbar() {
   }
 
   // Hide bottom nav on full-screen map / chat experiences
-  if (location.pathname === '/live-tracking' || location.pathname === '/chat') {
+  if (
+    location.pathname === '/live-tracking' ||
+    location.pathname === '/chat' ||
+    location.pathname === '/admin/transit'
+  ) {
     return null;
   }
 
@@ -35,6 +39,7 @@ export default function Navbar() {
         : user?.role === 'admin'
           ? [
               { label: 'Dashboard', icon: LayoutDashboard, path: '/admin' },
+              { label: 'Transit', icon: MapPin, path: '/admin/transit' },
               { label: 'Profile', icon: User, path: '/profile' },
             ]
           : [];

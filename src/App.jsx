@@ -22,8 +22,9 @@ import DriverTripActive from './pages/DriverTripActive';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 
-// Mapbox is heavy — load only when opening live tracking
+// Mapbox is heavy — load only when opening live tracking / admin transit map
 const LiveTracking = lazy(() => import('./pages/LiveTracking'));
+const AdminTransitMap = lazy(() => import('./pages/AdminTransitMap'));
 
 function ScreenLoader() {
   return (
@@ -198,6 +199,16 @@ function AppRoutes() {
           element={
             <ProtectedRoute roles={['admin']}>
               <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/transit"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <Suspense fallback={<ScreenLoader />}>
+                <AdminTransitMap />
+              </Suspense>
             </ProtectedRoute>
           }
         />

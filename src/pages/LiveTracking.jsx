@@ -5,7 +5,17 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi } from '../lib/api';
 import { connectSocket, getSocket } from '../lib/socket';
-import { DEFAULT_HOME, DEFAULT_SCHOOL, mapboxToken, watchPosition } from '../lib/geo';
+import {
+  DEFAULT_AVG_SPEED_KMH,
+  DEFAULT_HOME,
+  DEFAULT_SCHOOL,
+  fetchDrivingRoute,
+  formatDistanceKm,
+  formatEtaMinutes,
+  mapboxToken,
+  pickNextStep,
+  watchPosition,
+} from '../lib/geo';
 
 function toLngLat(coords, fallback) {
   if (coords?.lng != null && coords?.lat != null) {
@@ -45,6 +55,25 @@ function formatFeedTime(at) {
   }
 }
 
+function applyRouteMetrics(route, setEta, setDistance, setNavStep, currentPos) {
+  if (!route) {
+    setEta('Route unavailable');
+    setDistance('');
+    setNavStep?.(null);
+    return;
+  }
+  const kmLabel = formatDistanceKm(route.distanceKm);
+  const etaLabel = formatEtaMinutes(route.etaMinutes);
+  setDistance(kmLabel ? `${kmLabel} remaining` : '');
+  setEta(etaLabel !== '—' ? `${etaLabel} left` : 'Calculating…');
+  if (setNavStep) {
+    const step = currentPos
+      ? pickNextStep(route.steps, currentPos)
+      : route.nextStep;
+    setNavStep(step);
+  }
+}
+
 export default function LiveTracking() {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -54,6 +83,9 @@ export default function LiveTracking() {
   const shareCleanup = useRef(null);
   const trailRef = useRef([]);
   const lastRouteAt = useRef(0);
+  const routeStepsRef = useRef([]);
+  const lastDriverPos = useRef(null);
+  const followDriver = useRef(true);
 
   const [eta, setEta] = useState('Calculating…');
   const [status, setStatus] = useState('Loading…');
@@ -64,6 +96,8 @@ export default function LiveTracking() {
   const [liveHint, setLiveHint] = useState('');
   const [feed, setFeed] = useState([]);
   const [locationSharing, setLocationSharing] = useState(false);
+  const [navStep, setNavStep] = useState(null);
+  const [destLabel, setDestLabel] = useState('Destination');
 
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -113,11 +147,27 @@ export default function LiveTracking() {
     if (typeof driverMarker.current.setRotation === 'function') {
       driverMarker.current.setRotation(heading || 0);
     }
-    const center = map.current.getCenter();
-    const dx = Math.abs(center.lng - lng);
-    const dy = Math.abs(center.lat - lat);
-    if (dx > 0.008 || dy > 0.008) {
-      map.current.easeTo({ center: [lng, lat], duration: 800 });
+    lastDriverPos.current = { lng, lat, heading: heading || 0 };
+
+    // Keep map following the driver during active navigation
+    if (followDriver.current) {
+      map.current.easeTo({
+        center: [lng, lat],
+        bearing: heading || map.current.getBearing(),
+        duration: 700,
+      });
+    } else {
+      const center = map.current.getCenter();
+      const dx = Math.abs(center.lng - lng);
+      const dy = Math.abs(center.lat - lat);
+      if (dx > 0.008 || dy > 0.008) {
+        map.current.easeTo({ center: [lng, lat], duration: 800 });
+      }
+    }
+
+    // Refresh next-turn from last route steps without re-fetching
+    if (routeStepsRef.current.length) {
+      setNavStep(pickNextStep(routeStepsRef.current, { lng, lat }));
     }
   }, []);
 
@@ -127,68 +177,119 @@ export default function LiveTracking() {
     if (el) el.style.display = 'none';
   }, []);
 
-  /** Full planned route pickup → dropoff (always shown) */
+  /**
+   * Active navigation target for the driver:
+   * - assigned → go to pickup
+   * - in_transit / default → go to drop-off
+   */
+  const getNavDestination = useCallback(
+    (rideDoc) => {
+      const pickup = toLngLat(rideDoc?.pickupCoords, pickupLngLat.current);
+      const dropoff = toLngLat(rideDoc?.dropoffCoords, dropoffLngLat.current);
+      if (rideDoc?.status === 'assigned') {
+        return {
+          coords: pickup,
+          label: rideDoc?.pickup || 'Pickup',
+          phase: 'to_pickup',
+        };
+      }
+      return {
+        coords: dropoff,
+        label: rideDoc?.dropoff || 'Drop-off',
+        phase: 'to_dropoff',
+      };
+    },
+    [],
+  );
+
+  /** Full planned route pickup → dropoff (always shown as reference) */
   const loadPlannedRoute = useCallback(
-    async (token, from, to) => {
+    async (from, to) => {
       if (!map.current || !from || !to) return;
-      const query = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
-      try {
-        const res = await fetch(query);
-        const data = await res.json();
-        if (!data.routes?.[0]) {
-          setEta('Route unavailable');
-          return;
-        }
-        const route = data.routes[0];
-        setEta(`${Math.round(route.duration / 60)} mins`);
-        setDistance(`${(route.distance / 1000).toFixed(1)} km`);
-        const geometry = { type: 'Feature', geometry: route.geometry };
-        upsertLine('planned-route', 'planned-route-line', geometry, {
+      const route = await fetchDrivingRoute(from, to, { steps: false });
+      if (!route?.geometry) {
+        setEta('Route unavailable');
+        return;
+      }
+      // Only set global ETA/distance when we don't yet have a live remaining route
+      if (!lastRouteAt.current) {
+        applyRouteMetrics(route, setEta, setDistance, null, null);
+      }
+      upsertLine(
+        'planned-route',
+        'planned-route-line',
+        { type: 'Feature', geometry: route.geometry },
+        {
           'line-color': '#93c5fd',
           'line-width': 5,
           'line-opacity': 0.55,
           'line-dasharray': [1.5, 1.5],
-        });
-      } catch {
-        setEta('Route unavailable');
-      }
+        },
+      );
     },
     [upsertLine],
   );
 
-  /** Remaining route from current driver position → dropoff (updates during transit) */
+  /**
+   * Live remaining route from current position → active destination.
+   * Distance is road km from Mapbox; ETA is calculated from that km.
+   */
   const loadRemainingRoute = useCallback(
-    async (from, to) => {
-      const token = mapboxToken();
-      if (!token || !map.current || !from || !to) return;
+    async (from, to, { force = false, withSteps = false } = {}) => {
+      if (!map.current || !from || !to) return null;
       const now = Date.now();
-      // Throttle Mapbox Directions calls
-      if (now - lastRouteAt.current < 12000) return;
+      // Throttle Directions API (still re-pick next step locally between fetches)
+      if (!force && now - lastRouteAt.current < 10000) {
+        if (routeStepsRef.current.length && Array.isArray(from)) {
+          setNavStep(
+            pickNextStep(routeStepsRef.current, {
+              lng: from[0],
+              lat: from[1],
+            }),
+          );
+        }
+        return null;
+      }
       lastRouteAt.current = now;
 
-      const query = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
-      try {
-        const res = await fetch(query);
-        const data = await res.json();
-        if (!data.routes?.[0]) return;
-        const route = data.routes[0];
-        setEta(`${Math.round(route.duration / 60)} mins left`);
-        setDistance(`${(route.distance / 1000).toFixed(1)} km remaining`);
-        upsertLine(
-          'remaining-route',
-          'remaining-route-line',
-          { type: 'Feature', geometry: route.geometry },
-          {
-            'line-color': '#10b981',
-            'line-width': 4,
-            'line-opacity': 0.75,
-          },
-        );
-      } catch {
-        /* ignore transient route errors */
-      }
+      const route = await fetchDrivingRoute(from, to, {
+        steps: withSteps || isDriver,
+      });
+      if (!route) return null;
+
+      routeStepsRef.current = route.steps || [];
+      const pos = Array.isArray(from)
+        ? { lng: from[0], lat: from[1] }
+        : from;
+      applyRouteMetrics(route, setEta, setDistance, setNavStep, pos);
+
+      upsertLine(
+        'remaining-route',
+        'remaining-route-line',
+        { type: 'Feature', geometry: route.geometry },
+        {
+          'line-color': '#10b981',
+          'line-width': isDriver ? 6 : 4,
+          'line-opacity': 0.9,
+        },
+      );
+      return route;
     },
-    [upsertLine],
+    [upsertLine, isDriver],
+  );
+
+  /** Driver: re-route from current GPS to pickup or drop-off */
+  const refreshDriverNav = useCallback(
+    async (pos, rideDoc, { force = false } = {}) => {
+      if (!pos || pos.lng == null || pos.lat == null) return;
+      const dest = getNavDestination(rideDoc);
+      setDestLabel(dest.label);
+      await loadRemainingRoute([pos.lng, pos.lat], dest.coords, {
+        force,
+        withSteps: true,
+      });
+    },
+    [getNavDestination, loadRemainingRoute],
   );
 
   // Load ride
@@ -296,7 +397,7 @@ export default function LiveTracking() {
           .addTo(map.current);
 
         setMapReady(true);
-        loadPlannedRoute(token, from, to);
+        loadPlannedRoute(from, to);
         if (trailRef.current.length) setTrailOnMap(trailRef.current);
 
         try {
@@ -351,17 +452,32 @@ export default function LiveTracking() {
         ride.driverLocation.heading,
         true,
       );
-      loadRemainingRoute(
-        [ride.driverLocation.lng, ride.driverLocation.lat],
-        to,
-      );
+      if (isDriver) {
+        refreshDriverNav(
+          {
+            lng: ride.driverLocation.lng,
+            lat: ride.driverLocation.lat,
+          },
+          ride,
+          { force: true },
+        );
+      } else {
+        loadRemainingRoute(
+          [ride.driverLocation.lng, ride.driverLocation.lat],
+          to,
+          { force: true },
+        );
+      }
+    } else if (isDriver) {
+      // Driver always navigates even before sharing (en route to pickup)
+      hideDriverMarker();
+      setDestLabel(getNavDestination(ride).label);
     } else {
       hideDriverMarker();
     }
 
     if (canSeeLive && ride.trail?.length) setTrailOnMap(ride.trail);
-    const token = mapboxToken();
-    if (token) loadPlannedRoute(token, from, to);
+    loadPlannedRoute(from, to);
   }, [
     ride,
     mapReady,
@@ -371,6 +487,8 @@ export default function LiveTracking() {
     setTrailOnMap,
     loadPlannedRoute,
     loadRemainingRoute,
+    refreshDriverNav,
+    getNavDestination,
   ]);
 
   // Socket: join ride room + receive location / status; driver shares only while in transit
@@ -385,17 +503,19 @@ export default function LiveTracking() {
       if (!payload || String(payload.rideId) !== String(id)) return;
       if (payload.locationSharing === false) {
         setLocationSharing(false);
-        hideDriverMarker();
+        if (!isDriver) hideDriverMarker();
         setLiveHint('Location sharing stopped');
         return;
       }
       setLocationSharing(true);
       if (payload.lng != null && payload.lat != null) {
         moveDriverMarker(payload.lng, payload.lat, payload.heading, true);
-        loadRemainingRoute(
-          [payload.lng, payload.lat],
-          dropoffLngLat.current,
-        );
+        if (!isDriver) {
+          loadRemainingRoute(
+            [payload.lng, payload.lat],
+            dropoffLngLat.current,
+          );
+        }
       }
       if (Array.isArray(payload.trail)) {
         setTrailOnMap(payload.trail);
@@ -470,10 +590,13 @@ export default function LiveTracking() {
             ack.driverLocation.heading,
             true,
           );
-          loadRemainingRoute(
-            [ack.driverLocation.lng, ack.driverLocation.lat],
-            dropoffLngLat.current,
-          );
+          if (!isDriver) {
+            loadRemainingRoute(
+              [ack.driverLocation.lng, ack.driverLocation.lat],
+              dropoffLngLat.current,
+              { force: true },
+            );
+          }
         } else if (!isDriver) {
           hideDriverMarker();
           if (ack.status === 'assigned') {
@@ -490,43 +613,57 @@ export default function LiveTracking() {
     socket.on('ride:location', onLocation);
     socket.on('ride:status', onStatus);
 
-    // Driver: stream GPS only after confirm pickup
+    // Driver: always navigate from GPS; share location only after pickup confirmed
+    const isAssignedDriver =
+      isDriver && ride?.driverId === user.id && ride?.status !== 'completed';
+
     const driverCanShare =
-      isDriver &&
-      ride?.driverId === user.id &&
+      isAssignedDriver &&
       ride?.status === 'in_transit' &&
       ride?.locationSharing !== false;
 
-    if (driverCanShare) {
-      setLiveHint('Sharing your location with parent…');
+    if (isAssignedDriver) {
+      followDriver.current = true;
+      setLiveHint(
+        ride?.status === 'assigned'
+          ? 'Navigate to pickup · parent cannot track you yet'
+          : driverCanShare
+            ? 'Navigating to drop-off · sharing live with parent'
+            : 'Navigating to drop-off',
+      );
+      setDestLabel(getNavDestination(ride).label);
+
       shareCleanup.current = watchPosition(
         (pos) => {
           moveDriverMarker(pos.lng, pos.lat, pos.heading || 0, true);
-          loadRemainingRoute([pos.lng, pos.lat], dropoffLngLat.current);
-          const s = getSocket();
-          if (s?.connected) {
-            s.emit(
-              'ride:location',
-              {
-                rideId: id,
-                lng: pos.lng,
-                lat: pos.lat,
-                heading: pos.heading || 0,
-              },
-              () => {},
-            );
-          } else {
-            ridesApi
-              .updateLocation(id, {
-                lng: pos.lng,
-                lat: pos.lat,
-                heading: pos.heading || 0,
-              })
-              .catch(() => {});
+          refreshDriverNav(pos, ride);
+
+          if (driverCanShare) {
+            const s = getSocket();
+            if (s?.connected) {
+              s.emit(
+                'ride:location',
+                {
+                  rideId: id,
+                  lng: pos.lng,
+                  lat: pos.lat,
+                  heading: pos.heading || 0,
+                },
+                () => {},
+              );
+            } else {
+              ridesApi
+                .updateLocation(id, {
+                  lng: pos.lng,
+                  lat: pos.lat,
+                  heading: pos.heading || 0,
+                })
+                .catch(() => {});
+            }
           }
         },
         () => {
-          setLiveHint('Enable location to share your position');
+          setLiveHint('Enable device location for turn-by-turn directions');
         },
       );
     } else if (!isDriver) {
@@ -568,8 +705,6 @@ export default function LiveTracking() {
           .catch(() => {});
       }, 8000);
       shareCleanup.current = () => clearInterval(poll);
-    } else if (isDriver && ride?.status === 'assigned') {
-      setLiveHint('Confirm pickup on Active Trip to share location');
     }
 
     return () => {
@@ -587,6 +722,10 @@ export default function LiveTracking() {
     ride?.driverId,
     ride?.status,
     ride?.locationSharing,
+    ride?.pickup,
+    ride?.dropoff,
+    ride?.pickupCoords,
+    ride?.dropoffCoords,
     rideId,
     user,
     isDriver,
@@ -595,6 +734,9 @@ export default function LiveTracking() {
     hideDriverMarker,
     setTrailOnMap,
     loadRemainingRoute,
+    refreshDriverNav,
+    getNavDestination,
+    ride,
   ]);
 
   const markDelivered = async () => {

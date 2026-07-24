@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Users,
   Zap,
@@ -16,6 +17,7 @@ import {
   MapPin,
   Baby,
   Loader2,
+  Radio,
 } from 'lucide-react';
 import { adminApi } from '../lib/api';
 
@@ -202,11 +204,20 @@ export default function AdminDashboard() {
 
   return (
     <div className="mx-auto max-w-6xl p-6 pb-32">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900">Admin dashboard</h1>
-        <p className="mt-2 text-slate-600">
-          Live metrics, user management, and driver controls
-        </p>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Admin dashboard</h1>
+          <p className="mt-2 text-slate-600">
+            Live metrics, user management, and driver controls
+          </p>
+        </div>
+        <Link
+          to="/admin/transit"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+        >
+          <Radio size={16} className="text-emerald-400" />
+          Live transit map
+        </Link>
       </div>
 
       {/* Stats */}
