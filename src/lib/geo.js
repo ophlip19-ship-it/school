@@ -280,7 +280,14 @@ export async function forwardGeocode(query, token = mapboxToken()) {
   if (!token || !query?.trim()) return null;
   try {
     const q = encodeURIComponent(query.trim());
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?limit=1&access_token=${token}`;
+    const params = new URLSearchParams({
+      limit: '5',
+      country: 'ng',
+      proximity: `${DEFAULT_HOME.lng},${DEFAULT_HOME.lat}`,
+      types: 'address,poi,place,locality,neighborhood,district',
+      access_token: token,
+    });
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?${params}`;
     const res = await fetch(url);
     const data = await res.json();
     const f = data.features?.[0];
@@ -289,6 +296,11 @@ export async function forwardGeocode(query, token = mapboxToken()) {
       lng: f.center[0],
       lat: f.center[1],
       label: f.place_name,
+      results: (data.features || []).map((feat) => ({
+        lng: feat.center[0],
+        lat: feat.center[1],
+        label: feat.place_name,
+      })),
     };
   } catch {
     return null;

@@ -13,6 +13,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@mapbox/mapbox-gl-geocoder": "^5.1.2",
     "@stripe/react-stripe-js": "^6.8.0",
     "@stripe/stripe-js": "^9.10.0",
     "bcrypt": "^6.0.0",

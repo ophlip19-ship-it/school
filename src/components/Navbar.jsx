@@ -15,6 +15,7 @@ export default function Navbar() {
   // Hide bottom nav on full-screen map / chat experiences
   if (
     location.pathname === '/live-tracking' ||
+    location.pathname === '/pick-locations' ||
     location.pathname === '/chat' ||
     location.pathname === '/admin/transit'
   ) {

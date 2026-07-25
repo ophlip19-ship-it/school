@@ -5,7 +5,9 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapPin, Radio, RefreshCw, Users } from 'lucide-react';
 import { adminApi } from '../lib/api';
 import { connectSocket } from '../lib/socket';
-import { DEFAULT_HOME, DEFAULT_SCHOOL, mapboxToken } from '../lib/geo';
+import { DEFAULT_HOME, mapboxToken } from '../lib/geo';
+import { attachMapGeocoder } from '../lib/mapGeocoder';
+import MapBottomDrawer from '../components/MapBottomDrawer';
 
 const DRIVER_COLORS = [
   '#2563eb',
@@ -66,12 +68,17 @@ export default function AdminTransitMap() {
   const routeCache = useRef(new Map()); // rideId -> last route fetch time
   const ridesRef = useRef({});
 
+  const geocoderCleanup = useRef(null);
+  const searchMarker = useRef(null);
+
   const [rides, setRides] = useState({});
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState('');
   const [feed, setFeed] = useState([]);
   const [connected, setConnected] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [searchedPlace, setSearchedPlace] = useState(null);
 
   const rideList = Object.values(rides);
 
@@ -333,12 +340,41 @@ export default function AdminTransitMap() {
       pitch: 30,
     });
     map.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-    map.current.on('load', () => setMapReady(true));
+    map.current.on('load', () => {
+      setMapReady(true);
+      geocoderCleanup.current = attachMapGeocoder(map.current, {
+        position: 'top-left',
+        placeholder: 'Search location on transit map…',
+        marker: false,
+        flyTo: true,
+        onResult: ({ label, lng, lat }) => {
+          setSearchedPlace({ label, lng, lat });
+          if (searchMarker.current) {
+            searchMarker.current.setLngLat([lng, lat]);
+            searchMarker.current.getPopup()?.setText(label);
+          } else if (map.current) {
+            searchMarker.current = new mapboxgl.Marker({ color: '#f59e0b' })
+              .setLngLat([lng, lat])
+              .setPopup(new mapboxgl.Popup({ offset: 16 }).setText(label))
+              .addTo(map.current);
+          }
+        },
+        onClear: () => {
+          setSearchedPlace(null);
+          searchMarker.current?.remove();
+          searchMarker.current = null;
+        },
+      });
+    });
     map.current.on('error', () =>
       setError('Map failed to load. Check Mapbox token and network.'),
     );
 
     return () => {
+      geocoderCleanup.current?.();
+      geocoderCleanup.current = null;
+      searchMarker.current?.remove();
+      searchMarker.current = null;
       markersRef.current.forEach((m) => {
         m.driver?.remove();
         m.pickup?.remove();
@@ -551,145 +587,164 @@ export default function AdminTransitMap() {
     }
   };
 
+  const drawerSummary = (
+    <div className="flex min-w-0 items-center gap-2">
+      <Users size={16} className="shrink-0 text-slate-700" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold text-slate-900">
+          Transit · {rideList.length} live
+        </p>
+        <p className="truncate text-xs text-slate-500">
+          {connected ? 'Realtime connected' : 'Reconnecting…'}
+          {searchedPlace ? ` · ${searchedPlace.label}` : ''}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-slate-100">
-      <div ref={mapContainer} className="min-h-0 w-full flex-1" />
+    <div className="map-fullscreen map-geocoder-host">
+      <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
 
       {/* Top bar */}
-      <div className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center gap-2">
+      <div className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex flex-wrap items-start gap-2 p-3">
         <Link
           to="/admin"
-          className="flex h-11 items-center rounded-full bg-white px-4 text-sm font-semibold text-slate-800 shadow"
+          className="pointer-events-auto flex h-11 items-center rounded-full bg-white px-4 text-sm font-semibold text-slate-800 shadow"
         >
           ← Admin
         </Link>
-        <div className="flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-white shadow">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-slate-900 px-3 py-2 text-white shadow">
           <Radio size={16} className={connected ? 'text-emerald-400' : 'text-amber-400'} />
-          <span className="text-sm font-semibold">
-            Transit map · {rideList.length} live
-          </span>
-          <span className="text-[10px] text-slate-300">
-            {connected ? 'Realtime' : 'Reconnecting…'}
+          <span className="text-xs font-semibold sm:text-sm">
+            {rideList.length} live
           </span>
         </div>
-        <button
-          type="button"
-          onClick={refresh}
-          className="flex h-11 items-center gap-1 rounded-full bg-white px-3 text-sm font-medium text-slate-700 shadow"
-        >
-          <RefreshCw size={16} /> Refresh
-        </button>
-        <button
-          type="button"
-          onClick={fitAll}
-          className="flex h-11 items-center gap-1 rounded-full bg-white px-3 text-sm font-medium text-slate-700 shadow"
-        >
-          <MapPin size={16} /> Fit all
-        </button>
+        <div className="pointer-events-auto ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={refresh}
+            className="flex h-11 items-center gap-1 rounded-full bg-white px-3 text-sm font-medium text-slate-700 shadow"
+          >
+            <RefreshCw size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={fitAll}
+            className="flex h-11 items-center gap-1 rounded-full bg-white px-3 text-sm font-medium text-slate-700 shadow"
+          >
+            <MapPin size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen((o) => !o)}
+            className="flex h-11 items-center rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white shadow"
+          >
+            {drawerOpen ? 'Map' : 'Details'}
+          </button>
+        </div>
       </div>
 
       {error && (
-        <div className="absolute inset-x-4 top-20 z-20 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow">
+        <div className="absolute inset-x-4 top-20 z-30 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow">
           {error}
         </div>
       )}
 
-      {/* Side panel */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 flex max-h-[48vh] flex-col gap-0 overflow-hidden rounded-t-3xl bg-white shadow-2xl md:bottom-4 md:left-4 md:right-auto md:top-20 md:max-h-none md:w-96 md:rounded-3xl">
-        <div className="border-b border-slate-100 p-4">
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <Users size={18} /> Drivers in transit
-          </h1>
-          <p className="mt-1 text-xs text-slate-500">
-            Live routing & feed after pickup confirmation. Sharing stops at drop-off.
-          </p>
-        </div>
+      <MapBottomDrawer
+        open={drawerOpen}
+        onToggle={() => setDrawerOpen((o) => !o)}
+        summary={drawerSummary}
+        maxHeight="55vh"
+      >
+        <p className="mb-3 text-xs text-slate-500">
+          Live routing & feed after pickup confirmation. Sharing stops at drop-off. Use the
+          search bar to find any place on the map.
+        </p>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          {rideList.length === 0 ? (
-            <p className="p-3 text-sm text-slate-500">
-              No drivers currently sharing location. Drivers appear here after they confirm
-              pickup.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {rideList.map((r, i) => {
-                const color = colorForRide(r.id, i);
-                return (
-                  <li key={r.id}>
-                    <button
-                      type="button"
-                      onClick={() => focusRide(r.id)}
-                      className={`w-full rounded-2xl border p-3 text-left transition ${
-                        selectedId === r.id
-                          ? 'border-slate-900 bg-slate-50'
-                          : 'border-slate-200 bg-white hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span
-                          className="mt-1 h-3 w-3 shrink-0 rounded-full"
-                          style={{ background: color }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-slate-900">
-                            {r.driverName || 'Driver'}
-                            {r.vehiclePlate ? ` · ${r.vehiclePlate}` : ''}
-                          </p>
-                          <p className="truncate text-xs text-slate-500">
-                            {r.childName} · {r.pickup} → {r.dropoff}
-                          </p>
-                          <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-emerald-600">
-                            Live sharing
-                          </p>
-                        </div>
+        {rideList.length === 0 ? (
+          <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">
+            No drivers currently sharing location. Drivers appear here after they confirm
+            pickup.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {rideList.map((r, i) => {
+              const color = colorForRide(r.id, i);
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => focusRide(r.id)}
+                    className={`w-full rounded-2xl border p-3 text-left transition ${
+                      selectedId === r.id
+                        ? 'border-slate-900 bg-slate-50'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span
+                        className="mt-1 h-3 w-3 shrink-0 rounded-full"
+                        style={{ background: color }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-slate-900">
+                          {r.driverName || 'Driver'}
+                          {r.vehiclePlate ? ` · ${r.vehiclePlate}` : ''}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {r.childName} · {r.pickup} → {r.dropoff}
+                        </p>
+                        <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-emerald-600">
+                          Live sharing
+                        </p>
                       </div>
-                    </button>
-                  </li>
-                );
-              })}
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+            Live feed
+          </p>
+          {feed.length === 0 ? (
+            <p className="text-sm text-slate-500">No transit events yet.</p>
+          ) : (
+            <ul className="max-h-48 space-y-2 overflow-y-auto">
+              {feed.map((item, i) => (
+                <li
+                  key={`${item.rideId}-${item.at}-${i}`}
+                  className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-semibold text-slate-700">
+                      {item.driverName || item.childName || 'Trip'}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                      {formatFeedTime(item.at)}
+                    </span>
+                  </div>
+                  <p
+                    className={
+                      item.type === 'delivered'
+                        ? 'mt-0.5 text-emerald-700'
+                        : item.type === 'pickup_confirmed'
+                          ? 'mt-0.5 text-indigo-700'
+                          : 'mt-0.5 text-slate-600'
+                    }
+                  >
+                    {item.message}
+                  </p>
+                </li>
+              ))}
             </ul>
           )}
-
-          <div className="mt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
-              Live feed
-            </p>
-            {feed.length === 0 ? (
-              <p className="text-sm text-slate-500">No transit events yet.</p>
-            ) : (
-              <ul className="max-h-48 space-y-2 overflow-y-auto">
-                {feed.map((item, i) => (
-                  <li
-                    key={`${item.rideId}-${item.at}-${i}`}
-                    className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-semibold text-slate-700">
-                        {item.driverName || item.childName || 'Trip'}
-                      </span>
-                      <span className="shrink-0 font-mono text-[10px] text-slate-400">
-                        {formatFeedTime(item.at)}
-                      </span>
-                    </div>
-                    <p
-                      className={
-                        item.type === 'delivered'
-                          ? 'mt-0.5 text-emerald-700'
-                          : item.type === 'pickup_confirmed'
-                            ? 'mt-0.5 text-indigo-700'
-                            : 'mt-0.5 text-slate-600'
-                      }
-                    >
-                      {item.message}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </div>
-      </div>
+      </MapBottomDrawer>
     </div>
   );
 }
