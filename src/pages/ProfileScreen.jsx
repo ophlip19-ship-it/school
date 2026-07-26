@@ -46,8 +46,10 @@ export default function ProfileScreen() {
         {user?.role === 'parent' && (
           <div className="flex items-center gap-3 px-2 py-2">
             <User size={18} className="text-slate-400" />
-            <div>
-              <p className="text-xs text-slate-500">Children</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-slate-500">
+                Children ({(user?.children || []).length || (user?.childName ? 1 : 0)})
+              </p>
               <p className="font-medium text-slate-900">
                 {(user?.children || []).map((c) => c.name).join(', ') || user?.childName || '—'}
               </p>
@@ -66,12 +68,35 @@ export default function ProfileScreen() {
       </div>
 
       {user?.role === 'parent' && (
-        <Link
-          to="/add-child"
-          className="mt-4 block rounded-2xl border border-slate-200 bg-white py-3.5 text-center font-semibold text-slate-800"
-        >
-          Edit child profile
-        </Link>
+        <div className="mt-4 space-y-2">
+          {(user?.children || []).map((child) => (
+            <Link
+              key={child.id}
+              to={`/add-child?id=${child.id}`}
+              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-800"
+            >
+              {child.photoUrl ? (
+                <img
+                  src={child.photoUrl}
+                  alt=""
+                  className="h-10 w-10 rounded-xl object-cover"
+                />
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-sm font-bold text-emerald-700">
+                  {(child.name || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="min-w-0 flex-1 truncate">Edit {child.name}</span>
+              <span className="text-xs font-medium text-emerald-600">Edit</span>
+            </Link>
+          ))}
+          <Link
+            to="/add-child"
+            className="block rounded-2xl border border-dashed border-emerald-400 bg-emerald-50 py-3.5 text-center font-semibold text-emerald-700"
+          >
+            + Add another child
+          </Link>
+        </div>
       )}
 
       <button

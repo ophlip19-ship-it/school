@@ -4,6 +4,7 @@ import { Star, Shield, Car, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
 import { getBookingDraft, clearBookingDraft, setBookingDraft } from '../lib/booking';
+import { captureParentLocationForBooking } from '../lib/geo';
 
 const FARE_CENTS = 250000; // ₦2,500
 
@@ -60,6 +61,9 @@ export default function VehicleReview() {
         driverId: selectedDriver.id,
         driverName: selectedDriver.name,
       });
+      // Share parent GPS with the driver when the ride is booked
+      const parentLocation =
+        draft.parentLocation || (await captureParentLocationForBooking());
       const { ride } = await ridesApi.create({
         childId: draft.childId,
         driverId: selectedDriver.id,
@@ -67,6 +71,7 @@ export default function VehicleReview() {
         dropoff: draft.dropoff,
         pickupCoords: draft.pickupCoords || null,
         dropoffCoords: draft.dropoffCoords || null,
+        parentLocation: parentLocation || undefined,
         date: draft.date,
         time: draft.time,
         tripType: draft.tripType || 'pickup',

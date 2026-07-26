@@ -140,6 +140,23 @@ export default function DriverTripActive() {
                 <Clock size={16} /> {ride.date} · {ride.time}
               </p>
               <p>Parent: {ride.parentName}</p>
+              {ride.parentLocation?.lng != null && (
+                <p className="rounded-xl bg-white/15 px-3 py-2 text-xs leading-relaxed">
+                  <span className="font-semibold">Parent shared location at booking</span>
+                  <span className="mt-0.5 block text-emerald-50/90">
+                    {ride.parentLocation.label ||
+                      `${ride.parentLocation.lat.toFixed(5)}, ${ride.parentLocation.lng.toFixed(5)}`}
+                  </span>
+                  <a
+                    href={`https://www.google.com/maps?q=${ride.parentLocation.lat},${ride.parentLocation.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block font-semibold underline"
+                  >
+                    Navigate to parent
+                  </a>
+                </p>
+              )}
             </div>
           </div>
 

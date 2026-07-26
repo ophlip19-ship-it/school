@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Camera, ImagePlus, X } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Camera, ImagePlus, X, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { childrenApi } from '../lib/api';
 
@@ -46,24 +46,51 @@ async function compressImage(file, maxEdge = 480, quality = 0.72) {
 export default function AddChildProfile() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
-  const fileRef = useRef(null);
-  const existing = user?.children?.[0];
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id') || '';
 
-  const [childName, setChildName] = useState(existing?.name || user?.childName || '');
-  const [grade, setGrade] = useState(existing?.grade || 'Grade 5');
-  const [school, setSchool] = useState(existing?.school || user?.school || 'Greenfield School');
-  const [photoUrl, setPhotoUrl] = useState(existing?.photoUrl || '');
+  const galleryRef = useRef(null);
+  const cameraRef = useRef(null);
+
+  const children = user?.children || [];
+  const existing = editId
+    ? children.find((c) => c.id === editId) || null
+    : null;
+  const isEdit = Boolean(existing);
+
+  const [childName, setChildName] = useState('');
+  const [grade, setGrade] = useState('Grade 5');
+  const [school, setSchool] = useState('Greenfield School');
+  const [photoUrl, setPhotoUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [savedChildId, setSavedChildId] = useState(null);
 
+  // Load edit target or blank form for a new child (keyed by editId only)
   useEffect(() => {
-    if (existing) {
-      setChildName(existing.name);
-      setGrade(existing.grade || 'Grade 5');
-      setSchool(existing.school || 'Greenfield School');
-      setPhotoUrl(existing.photoUrl || '');
+    if (editId) {
+      const target = (user?.children || []).find((c) => c.id === editId);
+      if (target) {
+        setChildName(target.name || '');
+        setGrade(target.grade || 'Grade 5');
+        setSchool(target.school || 'Greenfield School');
+        setPhotoUrl(target.photoUrl || '');
+      }
+      setSavedChildId(null);
+      return;
     }
-  }, [existing]);
+    // New child — blank form (do not prefill from first child)
+    setChildName('');
+    setGrade('Grade 5');
+    const defaultSchool =
+      user?.school ||
+      user?.children?.[0]?.school ||
+      'Greenfield School';
+    setSchool(defaultSchool);
+    setPhotoUrl('');
+    setSavedChildId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-init when switching child id / new form
+  }, [editId, user?.children, user?.school]);
 
   const onPickPhoto = async (e) => {
     const file = e.target.files?.[0];
@@ -81,22 +108,41 @@ export default function AddChildProfile() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async ({ addAnother = false } = {}) => {
     setError('');
+    if (!childName.trim()) {
+      setError('Child name is required');
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
-        name: childName.trim() || 'Alex',
+        name: childName.trim(),
         school: school.trim() || 'Greenfield School',
         grade,
         photoUrl: photoUrl || '',
       };
-      if (existing?.id) {
-        await childrenApi.update(existing.id, payload);
+      let child;
+      if (isEdit && existing?.id) {
+        const res = await childrenApi.update(existing.id, payload);
+        child = res.child;
       } else {
-        await childrenApi.create(payload);
+        const res = await childrenApi.create(payload);
+        child = res.child;
       }
       await refreshUser();
+      setSavedChildId(child?.id || existing?.id || null);
+
+      if (addAnother) {
+        // Reset for another new child
+        navigate('/add-child', { replace: true });
+        setChildName('');
+        setGrade('Grade 5');
+        setSchool(payload.school);
+        setPhotoUrl('');
+        setSavedChildId(null);
+        return;
+      }
       navigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Failed to save child');
@@ -108,11 +154,49 @@ export default function AddChildProfile() {
   return (
     <div className="mx-auto min-h-screen max-w-md px-6 py-10">
       <h1 className="text-3xl font-bold text-slate-900">
-        {existing ? 'Edit child profile' : 'Add child profile'}
+        {isEdit ? 'Edit child profile' : 'Add child profile'}
       </h1>
       <p className="mt-2 text-slate-600">
-        Add a photo so drivers can confirm the right child at handover.
+        {isEdit
+          ? 'Update this child’s details and photo for driver handover.'
+          : 'You can add more than one child. Each profile has its own photo and school.'}
       </p>
+
+      {children.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <Users size={12} /> Your children ({children.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {children.map((c) => (
+              <Link
+                key={c.id}
+                to={`/add-child?id=${c.id}`}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
+                  editId === c.id
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800'
+                }`}
+              >
+                {c.photoUrl ? (
+                  <img
+                    src={c.photoUrl}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                ) : null}
+                {c.name}
+              </Link>
+            ))}
+            <Link
+              to="/add-child"
+              className="inline-flex items-center rounded-full border border-dashed border-emerald-400 px-3 py-1.5 text-sm font-semibold text-emerald-700"
+            >
+              + New
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col items-center">
         <div className="relative">
@@ -138,22 +222,46 @@ export default function AddChildProfile() {
             </button>
           )}
         </div>
+
+        {/* Gallery (device album) — no capture attribute */}
         <input
-          ref={fileRef}
+          ref={galleryRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={onPickPhoto}
+        />
+        {/* Camera — capture prompts device camera on mobile */}
+        <input
+          ref={cameraRef}
           type="file"
           accept="image/*"
           capture="environment"
           className="hidden"
           onChange={onPickPhoto}
         />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:border-emerald-500 hover:text-emerald-700"
-        >
-          <ImagePlus size={16} />
-          {photoUrl ? 'Change photo' : 'Add photo'}
-        </button>
+
+        <div className="mt-4 flex w-full max-w-xs gap-2">
+          <button
+            type="button"
+            onClick={() => galleryRef.current?.click()}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:border-emerald-500 hover:text-emerald-700"
+          >
+            <ImagePlus size={16} />
+            Album
+          </button>
+          <button
+            type="button"
+            onClick={() => cameraRef.current?.click()}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:border-emerald-500 hover:text-emerald-700"
+          >
+            <Camera size={16} />
+            Camera
+          </button>
+        </div>
+        <p className="mt-2 text-center text-xs text-slate-500">
+          Choose from your device album or take a new photo with the camera.
+        </p>
       </div>
 
       <div className="mt-8 space-y-4">
@@ -162,6 +270,7 @@ export default function AddChildProfile() {
           <input
             value={childName}
             onChange={(e) => setChildName(e.target.value)}
+            placeholder="e.g. Alex"
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
           />
         </div>
@@ -192,21 +301,36 @@ export default function AddChildProfile() {
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+      {savedChildId && !error && (
+        <p className="mt-4 text-sm text-emerald-700">Child saved.</p>
+      )}
 
       <button
         type="button"
-        onClick={handleSave}
+        onClick={() => handleSave({ addAnother: false })}
         disabled={loading}
         className="mt-10 w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
       >
-        {loading ? 'Saving…' : 'Save profile'}
+        {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Save child'}
       </button>
+
+      {!isEdit && (
+        <button
+          type="button"
+          onClick={() => handleSave({ addAnother: true })}
+          disabled={loading}
+          className="mt-3 w-full rounded-2xl border border-emerald-600 bg-white py-3.5 font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+        >
+          Save &amp; add another child
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => navigate('/dashboard')}
         className="mt-3 w-full py-3 text-sm font-medium text-slate-500"
       >
-        Skip for now
+        {isEdit ? 'Cancel' : 'Skip for now'}
       </button>
     </div>
   );

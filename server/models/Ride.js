@@ -30,6 +30,14 @@ const rideSchema = new mongoose.Schema(
       lng: { type: Number, default: null },
       lat: { type: Number, default: null },
     },
+    /** Parent GPS at booking time — shared with the assigned driver */
+    parentLocation: {
+      lng: { type: Number, default: null },
+      lat: { type: Number, default: null },
+      accuracy: { type: Number, default: null },
+      label: { type: String, default: '' },
+      updatedAt: { type: Date, default: null },
+    },
     driverLocation: {
       lng: { type: Number, default: null },
       lat: { type: Number, default: null },

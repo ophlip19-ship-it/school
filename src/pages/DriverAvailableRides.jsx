@@ -79,6 +79,27 @@ export default function DriverAvailableRides() {
         <p className="flex items-center gap-2">
           <Clock size={14} /> {ride.date} · {ride.time}
         </p>
+        {ride.parentLocation?.lng != null && (
+          <p className="flex items-start gap-2 rounded-xl bg-sky-50 px-2.5 py-2 text-sky-900">
+            <Navigation size={14} className="mt-0.5 shrink-0 text-sky-600" />
+            <span>
+              <span className="font-semibold">Parent location shared</span>
+              <span className="mt-0.5 block text-xs text-sky-800">
+                {ride.parentLocation.label ||
+                  `${ride.parentLocation.lat.toFixed(5)}, ${ride.parentLocation.lng.toFixed(5)}`}
+              </span>
+              <a
+                href={`https://www.google.com/maps?q=${ride.parentLocation.lat},${ride.parentLocation.lng}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-block text-xs font-semibold text-sky-700 underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Open in maps
+              </a>
+            </span>
+          </p>
+        )}
       </div>
       {preferred ? (
         <div className="mt-4 flex gap-2">

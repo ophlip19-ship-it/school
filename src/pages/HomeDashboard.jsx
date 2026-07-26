@@ -21,7 +21,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
-import { resolveDestination, resolvePickup } from '../lib/geo';
+import {
+  resolveDestination,
+  resolvePickup,
+  captureParentLocationForBooking,
+} from '../lib/geo';
+import AddressSearchInput from '../components/AddressSearchInput';
 
 function ChildAvatar({ child, size = 'md' }) {
   const dim =
@@ -60,6 +65,7 @@ export default function HomeDashboard() {
   const [pickupMode, setPickupMode] = useState('home'); // home | current
   const [dropoffMode, setDropoffMode] = useState('school'); // school | custom
   const [customDropoff, setCustomDropoff] = useState('');
+  const [customDropoffPlace, setCustomDropoffPlace] = useState(null);
 
   const children = user?.children || [];
 
@@ -119,6 +125,9 @@ export default function HomeDashboard() {
 
     setInstantLoading(true);
     try {
+      // Always try to send parent GPS to the driver at booking time
+      const parentLocation = await captureParentLocationForBooking();
+
       const from = await resolvePickup({
         mode: pickupMode === 'current' ? 'current' : 'home',
         homeAddress: user?.homeAddress || `Home · pickup for ${child.name}`,
@@ -128,6 +137,7 @@ export default function HomeDashboard() {
         mode: dropoffMode === 'custom' ? 'custom' : 'school',
         schoolName: child.school || school,
         customLabel: customDropoff.trim(),
+        customCoords: customDropoffPlace,
       });
 
       const { ride } = await ridesApi.create({
@@ -139,6 +149,7 @@ export default function HomeDashboard() {
         dropoff: to.label,
         pickupCoords: { lng: from.lng, lat: from.lat },
         dropoffCoords: { lng: to.lng, lat: to.lat },
+        parentLocation: parentLocation || undefined,
       });
       navigate(`/payment?rideId=${ride.id}`);
     } catch (err) {
@@ -259,12 +270,25 @@ export default function HomeDashboard() {
               </button>
             </div>
             {dropoffMode === 'custom' && (
-              <input
-                value={customDropoff}
-                onChange={(e) => setCustomDropoff(e.target.value)}
-                placeholder="Enter destination address"
-                className="mt-2 w-full rounded-xl border-0 bg-white/95 px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-              />
+              <div className="mt-2">
+                <AddressSearchInput
+                  dark
+                  value={customDropoff}
+                  onChange={(v) => {
+                    setCustomDropoff(v);
+                    setCustomDropoffPlace(null);
+                  }}
+                  onSelect={(place) => {
+                    setCustomDropoff(place.label);
+                    setCustomDropoffPlace({
+                      label: place.label,
+                      lng: place.lng,
+                      lat: place.lat,
+                    });
+                  }}
+                  placeholder="Search destination address…"
+                />
+              </div>
             )}
           </div>
         </div>
@@ -516,15 +540,22 @@ export default function HomeDashboard() {
         </div>
       </div>
 
-      {/* Children with photos */}
+      {/* Children with photos — support multiple children */}
       <div className="mb-8">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">Your children</h2>
+          <h2 className="text-xl font-bold text-slate-900">
+            Your children
+            {children.length > 0 ? (
+              <span className="ml-2 text-base font-semibold text-slate-400">
+                ({children.length})
+              </span>
+            ) : null}
+          </h2>
           <Link
             to="/add-child"
             className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white"
           >
-            <Plus size={16} /> Add
+            <Plus size={16} /> Add child
           </Link>
         </div>
         <div className="space-y-3">
@@ -541,7 +572,7 @@ export default function HomeDashboard() {
                 </p>
               </div>
               <Link
-                to="/add-child"
+                to={`/add-child?id=${child.id}`}
                 className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-500 hover:text-emerald-700"
                 title="Edit profile / photo"
               >
@@ -552,8 +583,16 @@ export default function HomeDashboard() {
           ))}
           {children.length === 0 && (
             <p className="text-sm text-slate-500">
-              No children yet — add one to book rides.
+              No children yet — add one or more to book rides.
             </p>
+          )}
+          {children.length > 0 && (
+            <Link
+              to="/add-child"
+              className="block rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/50 py-3 text-center text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+            >
+              + Add another child
+            </Link>
           )}
         </div>
       </div>

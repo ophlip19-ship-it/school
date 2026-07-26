@@ -358,6 +358,7 @@ export async function resolvePickup({
 
 /**
  * Resolve destination: school | custom
+ * Prefer local address database, then Mapbox, then defaults.
  */
 export async function resolveDestination({
   mode,
@@ -365,10 +366,31 @@ export async function resolveDestination({
   customLabel,
   customCoords,
 }) {
+  // Dynamic import keeps address DB optional at module load (avoids cycle with geo constants)
+  let findSchoolInDatabase = null;
+  let filterAddressDatabase = null;
+  try {
+    const db = await import('./addressDatabase.js');
+    findSchoolInDatabase = db.findSchoolInDatabase;
+    filterAddressDatabase = db.filterAddressDatabase;
+  } catch {
+    /* address DB unavailable */
+  }
+
   if (mode === 'school') {
     const label = schoolName
       ? `${schoolName} · main gate`
       : DEFAULT_SCHOOL.label;
+    const local = findSchoolInDatabase?.(schoolName || 'Greenfield');
+    if (local) {
+      return {
+        label: local.label.includes('main gate')
+          ? local.label
+          : `${local.label} · main gate`,
+        lng: local.lng,
+        lat: local.lat,
+      };
+    }
     const geo = await forwardGeocode(schoolName || DEFAULT_SCHOOL.label);
     return {
       label,
@@ -384,10 +406,49 @@ export async function resolveDestination({
       lat: customCoords.lat,
     };
   }
+
+  const localHits = filterAddressDatabase?.(customLabel || '', { limit: 1 }) || [];
+  if (localHits[0]) {
+    return {
+      label: customLabel || localHits[0].label,
+      lng: localHits[0].lng,
+      lat: localHits[0].lat,
+    };
+  }
+
   const geo = await forwardGeocode(customLabel || DEFAULT_SCHOOL.label);
   return {
     label: customLabel || geo?.label || DEFAULT_SCHOOL.label,
     lng: geo?.lng ?? DEFAULT_SCHOOL.lng,
     lat: geo?.lat ?? DEFAULT_SCHOOL.lat,
   };
+}
+
+/**
+ * Capture parent GPS to send to the driver when booking a ride.
+ * Returns null if permission is denied / unavailable (booking still proceeds).
+ */
+export async function captureParentLocationForBooking() {
+  try {
+    const pos = await getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 30000,
+    });
+    let label = '';
+    try {
+      label = await reverseGeocode(pos.lng, pos.lat);
+    } catch {
+      label = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+    }
+    return {
+      lng: pos.lng,
+      lat: pos.lat,
+      accuracy: pos.accuracy ?? null,
+      label: label ? `Parent location · ${label}` : 'Parent location',
+      updatedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }

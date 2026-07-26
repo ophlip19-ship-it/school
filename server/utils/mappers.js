@@ -31,6 +31,16 @@ export function mapRide(ride, extras = {}) {
       r.dropoffCoords?.lng != null && r.dropoffCoords?.lat != null
         ? { lng: r.dropoffCoords.lng, lat: r.dropoffCoords.lat }
         : null,
+    parentLocation:
+      r.parentLocation?.lng != null && r.parentLocation?.lat != null
+        ? {
+            lng: r.parentLocation.lng,
+            lat: r.parentLocation.lat,
+            accuracy: r.parentLocation.accuracy ?? null,
+            label: r.parentLocation.label || '',
+            updatedAt: r.parentLocation.updatedAt || null,
+          }
+        : null,
     locationSharing: !!r.locationSharing,
     pickedUpAt: r.pickedUpAt || null,
     deliveredAt: r.deliveredAt || null,

@@ -37,7 +37,9 @@ export default function SelectChildren() {
         ← Dashboard
       </Link>
       <h1 className="mt-4 text-3xl font-bold text-slate-900">Select children</h1>
-      <p className="mt-2 text-slate-600">Who is riding today?</p>
+      <p className="mt-2 text-slate-600">
+        Who is riding today? You can manage multiple children on your account.
+      </p>
 
       {loading && <p className="mt-8 text-slate-500">Loading…</p>}
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -85,6 +87,14 @@ export default function SelectChildren() {
               Add a child
             </Link>
           </div>
+        )}
+        {!loading && children.length > 0 && (
+          <Link
+            to="/add-child"
+            className="block rounded-2xl border border-dashed border-emerald-300 py-3 text-center text-sm font-semibold text-emerald-700"
+          >
+            + Add another child
+          </Link>
         )}
       </div>
 

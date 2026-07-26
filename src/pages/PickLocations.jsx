@@ -12,9 +12,11 @@ import {
   resolveDestination,
   resolvePickup,
   reverseGeocode,
+  captureParentLocationForBooking,
 } from '../lib/geo';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
 import MapBottomDrawer from '../components/MapBottomDrawer';
+import AddressSearchInput from '../components/AddressSearchInput';
 
 export default function PickLocations() {
   const navigate = useNavigate();
@@ -287,6 +289,9 @@ export default function PickLocations() {
         });
       }
 
+      // Capture parent GPS so the driver receives it when the ride is booked
+      const parentLocation = await captureParentLocationForBooking();
+
       setBookingDraft({
         pickup: from.label,
         dropoff: to.label,
@@ -297,6 +302,7 @@ export default function PickLocations() {
         customPickup: customPickup || from.label,
         customDropoff: customDropoff || to.label,
         school,
+        parentLocation: parentLocation || null,
       });
       navigate('/schedule');
     } catch (err) {
@@ -521,9 +527,34 @@ export default function PickLocations() {
             >
               <Map size={18} className="text-slate-600" />
               <span className="text-sm font-semibold text-slate-900">Desired location</span>
-              <span className="text-[11px] text-slate-500">Search or tap map</span>
+              <span className="text-[11px] text-slate-500">Search address book</span>
             </button>
           </div>
+
+          {dropoffMode === 'custom' && (
+            <div className="mt-3">
+              <AddressSearchInput
+                value={customDropoff}
+                onChange={(v) => {
+                  setCustomDropoff(v);
+                  setActiveField('dropoff');
+                }}
+                onSelect={({ label, lng, lat }) => {
+                  setDropoffMode('custom');
+                  setActiveField('dropoff');
+                  setCustomDropoff(label);
+                  setDropoffPlace({ label, lng, lat });
+                  map.current?.easeTo({
+                    center: [lng, lat],
+                    zoom: 14,
+                    duration: 500,
+                  });
+                }}
+                placeholder="Filter destinations from address book…"
+              />
+            </div>
+          )}
+
           {dropoffPlace && (
             <p className="mt-2 truncate rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
               ✓ {dropoffPlace.label}

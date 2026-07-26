@@ -140,6 +140,7 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       dropoff,
       pickupCoords,
       dropoffCoords,
+      parentLocation,
       date,
       time,
       tripType = 'pickup',
@@ -217,6 +218,32 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     if (!fromCoords) fromCoords = { lng: 3.4734, lat: 6.4474 };
     if (!toCoords) toCoords = { lng: 3.4219, lat: 6.4281 };
 
+    // Parent shares live GPS with the driver at booking time
+    const parentCoords = parseCoords(parentLocation);
+    let parentLoc = null;
+    if (parentCoords) {
+      parentLoc = {
+        lng: parentCoords.lng,
+        lat: parentCoords.lat,
+        accuracy:
+          parentLocation?.accuracy != null &&
+          Number.isFinite(Number(parentLocation.accuracy))
+            ? Number(parentLocation.accuracy)
+            : null,
+        label: String(parentLocation?.label || '').trim().slice(0, 240),
+        updatedAt: new Date(),
+      };
+      // Keep parent lastLocation in sync for fleet / support tools
+      await User.findByIdAndUpdate(req.user.id, {
+        lastLocation: {
+          lng: parentCoords.lng,
+          lat: parentCoords.lat,
+          heading: 0,
+          updatedAt: parentLoc.updatedAt,
+        },
+      });
+    }
+
     const pin = String(Math.floor(1000 + Math.random() * 9000));
     const created = await Ride.create({
       parentId: req.user.id,
@@ -227,6 +254,13 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       dropoff: String(rideDropoff).trim(),
       pickupCoords: fromCoords,
       dropoffCoords: toCoords,
+      parentLocation: parentLoc || {
+        lng: null,
+        lat: null,
+        accuracy: null,
+        label: '',
+        updatedAt: null,
+      },
       driverLocation: {
         lng: fromCoords.lng,
         lat: fromCoords.lat,

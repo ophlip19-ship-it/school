@@ -2,6 +2,7 @@ import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder';
 import mapboxgl from 'mapbox-gl';
 import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
 import { DEFAULT_HOME, mapboxToken } from './geo';
+import { filterAddressDatabase } from './addressDatabase';
 
 /** Lagos metro bias for search ranking */
 export const GEOCODER_PROXIMITY = {
@@ -10,8 +11,34 @@ export const GEOCODER_PROXIMITY = {
 };
 
 /**
+ * LocalGeocoder for Mapbox control — filters the in-app address database.
+ * Returns GeoJSON features so they appear alongside Mapbox results.
+ */
+export function localAddressGeocoder(query) {
+  const hits = filterAddressDatabase(query, { limit: 6 });
+  return hits.map((entry) => ({
+    type: 'Feature',
+    id: entry.id,
+    place_name: entry.label,
+    text: entry.name,
+    center: [entry.lng, entry.lat],
+    geometry: {
+      type: 'Point',
+      coordinates: [entry.lng, entry.lat],
+    },
+    properties: {
+      source: 'schoolrun-address-db',
+      type: entry.type,
+      area: entry.area,
+    },
+    place_type: [entry.type || 'poi'],
+  }));
+}
+
+/**
  * Create a Mapbox Geocoder control for location search & filter.
  * Biased toward Lagos / Nigeria school-run usage.
+ * Merges local address database results via localGeocoder.
  *
  * @param {object} [options]
  * @param {string} [options.placeholder]
@@ -41,6 +68,8 @@ export function createMapGeocoder(options = {}) {
     limit: options.limit ?? 6,
     clearOnBlur: false,
     collapsed: false,
+    localGeocoder: options.localGeocoder || localAddressGeocoder,
+    localGeocoderOnly: options.localGeocoderOnly === true,
     ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
   });
 }
