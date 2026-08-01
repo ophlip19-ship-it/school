@@ -85,7 +85,7 @@ export default function DriverTripActive() {
 
   if (!ride && !error) {
     return (
-      <div className="mx-auto max-w-md p-6">
+      <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6">
         <p className="text-slate-600">No active trip.</p>
         <Link to="/driver/rides" className="mt-4 inline-block text-emerald-600">
           Browse available rides
@@ -98,11 +98,11 @@ export default function DriverTripActive() {
   const inTransit = ride?.status === 'in_transit';
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-32">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28 lg:pb-12">
       <Link to="/driver" className="text-sm font-medium text-emerald-600">
         ← Dashboard
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Active trip</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Active trip</h1>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
       {ride && (

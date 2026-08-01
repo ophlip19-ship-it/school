@@ -32,11 +32,11 @@ export default function SelectChildren() {
   };
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-28">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28 lg:pb-12">
       <Link to="/dashboard" className="text-sm font-medium text-emerald-600">
         ← Dashboard
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Select children</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Select children</h1>
       <p className="mt-2 text-slate-600">
         Who is riding today? You can manage multiple children on your account.
       </p>

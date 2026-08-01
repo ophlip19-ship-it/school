@@ -135,7 +135,7 @@ export default function ChatScreen() {
   }
 
   return (
-    <div className="mx-auto flex h-screen max-w-md flex-col bg-white">
+    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-white md:max-w-xl lg:max-w-2xl lg:h-[calc(100dvh-3.5rem)]">
       <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-4">
         <button
           type="button"

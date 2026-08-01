@@ -87,7 +87,7 @@ export default function VehicleReview() {
   };
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-28">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28 lg:pb-12">
       <Link to="/schedule" className="text-sm font-medium text-emerald-600">
         ← Back
       </Link>

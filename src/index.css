@@ -23,6 +23,22 @@ body {
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Prevent horizontal overflow on small screens */
+  overflow-x: hidden;
+}
+
+/* Safe area for notched phones (bottom nav / drawers) */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Responsive media defaults */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
 }
 
 button,

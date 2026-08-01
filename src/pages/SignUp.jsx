@@ -75,11 +75,11 @@ export default function SignUp() {
   };
 
   return (
-    <div className="mx-auto min-h-screen max-w-md px-6 py-10">
+    <div className="mx-auto min-h-screen w-full max-w-md px-4 py-8 sm:px-6 sm:py-10 md:max-w-lg">
       <Link to="/" className="text-sm font-medium text-emerald-600">
         ← Back
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">
         {mode === 'login' ? 'Welcome back' : 'Create account'}
       </h1>
       <p className="mt-2 text-slate-600">
@@ -224,10 +224,6 @@ export default function SignUp() {
 
       
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-       <p className='flex flex-rol justify-between'>
-        <button onClick={()=> navigate('/verify')} className="font-bold text-4xl text-red-500">parent</button>
-       <button onClick={()=> navigate('/driver')} className="font-bold text-4xl text-red-500">driver</button>
-       <button onClick={()=> navigate('/admin')} className="font-bold text-4xl text-red-500">admin</button></p>
         <p className="font-semibold text-slate-800">Demo logins (password: password123)</p>
         <p className="mt-1">parent@schoolrun.app · driver@schoolrun.app · admin@schoolrun.app</p>
       </div>

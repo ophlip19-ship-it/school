@@ -153,10 +153,60 @@ router.get('/me', requireAuth, async (req, res) => {
   res.json({ user });
 });
 
+/**
+ * Re-authenticate before sensitive profile changes.
+ * Body: { password }
+ */
+router.post('/confirm-identity', requireAuth, async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required to verify your identity' });
+    }
+    const ok = await bcrypt.compare(String(password), req.userDoc.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: 'Incorrect password. Please try again.' });
+    }
+    return res.json({ ok: true, message: 'Identity confirmed' });
+  } catch (err) {
+    console.error('[auth/confirm-identity]', err);
+    return res.status(500).json({ error: 'Could not verify identity' });
+  }
+});
+
+/**
+ * Update profile. Requires currentPassword so only the account owner can change details.
+ * Body: { currentPassword, name?, phone?, vehiclePlate?, homeAddress?, homeCoords? }
+ */
 router.patch('/me', requireAuth, async (req, res) => {
   try {
-    const { name, phone, vehiclePlate, homeAddress, homeCoords } = req.body || {};
-    if (name != null) req.userDoc.name = String(name).trim();
+    const {
+      currentPassword,
+      name,
+      phone,
+      vehiclePlate,
+      homeAddress,
+      homeCoords,
+    } = req.body || {};
+
+    if (!currentPassword) {
+      return res
+        .status(400)
+        .json({ error: 'Enter your password to confirm it is you before saving changes' });
+    }
+
+    const ok = await bcrypt.compare(String(currentPassword), req.userDoc.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: 'Incorrect password. Changes were not saved.' });
+    }
+
+    if (name != null) {
+      const trimmed = String(name).trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: 'Name cannot be empty' });
+      }
+      req.userDoc.name = trimmed;
+    }
     if (phone != null) req.userDoc.phone = String(phone).trim();
     if (vehiclePlate != null) {
       req.userDoc.vehiclePlate = String(vehiclePlate).trim();
@@ -173,7 +223,10 @@ router.patch('/me', requireAuth, async (req, res) => {
         lng: Number(homeCoords.lng),
         lat: Number(homeCoords.lat),
       };
+    } else if (homeCoords === null) {
+      req.userDoc.homeCoords = { lng: null, lat: null };
     }
+
     await req.userDoc.save();
     const user = await enrichUser(req.userDoc.toPublic());
     res.json({ user });

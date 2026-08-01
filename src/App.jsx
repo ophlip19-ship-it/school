@@ -1,7 +1,25 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
+
+const NAV_HIDDEN = new Set([
+  '/',
+  '/signup',
+  '/verify',
+  '/add-child',
+  '/payment',
+  '/live-tracking',
+  '/pick-locations',
+  '/chat',
+  '/admin/transit',
+]);
 
 import Welcome from './pages/welcome';
 import SignUp from './pages/SignUp';
@@ -54,9 +72,27 @@ function ProtectedRoute({ children, roles }) {
   return children;
 }
 
+function AppShell({ children }) {
+  const { isAuthenticated } = useAuth();
+  const { pathname } = useLocation();
+  const showNav = isAuthenticated && !NAV_HIDDEN.has(pathname);
+
+  return (
+    <div
+      className={`min-h-screen bg-slate-50 ${
+        showNav
+          ? 'pb-24 lg:pb-0 lg:pt-14'
+          : 'pb-0 pt-0'
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
 function AppRoutes() {
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <AppShell>
       <Routes>
         <Route path="/" element={<Welcome />} />
         <Route path="/signup" element={<SignUp />} />
@@ -215,7 +251,7 @@ function AppRoutes() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </div>
+    </AppShell>
   );
 }
 

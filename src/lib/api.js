@@ -48,6 +48,8 @@ export const authApi = {
   login: (body) => api("/auth/login", { method: "POST", body }),
   me: () => api("/auth/me"),
   updateMe: (body) => api("/auth/me", { method: "PATCH", body }),
+  confirmIdentity: (body) =>
+    api("/auth/confirm-identity", { method: "POST", body }),
   verify: () => api("/auth/verify", { method: "POST", body: {} }),
 };
 

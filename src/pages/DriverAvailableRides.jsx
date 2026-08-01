@@ -134,11 +134,11 @@ export default function DriverAvailableRides() {
   );
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-32">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-2xl lg:max-w-3xl pb-28 lg:pb-12">
       <Link to="/driver" className="text-sm font-medium text-emerald-600">
         ← Dashboard
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Available rides</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Available rides</h1>
       <p className="mt-2 text-slate-600">
         {requests.length} preferred · {openPool.length} open pool
       </p>

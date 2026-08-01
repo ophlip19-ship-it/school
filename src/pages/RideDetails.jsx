@@ -6,7 +6,7 @@ export default function RideDetails() {
 
   if (!ride) {
     return (
-      <div className="mx-auto max-w-md p-6">
+      <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6">
         <p className="text-slate-600">No ride selected.</p>
         <Link to="/history" className="mt-4 inline-block text-emerald-600">
           ← History
@@ -16,11 +16,11 @@ export default function RideDetails() {
   }
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-32">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28 lg:pb-12">
       <Link to="/history" className="text-sm font-medium text-emerald-600">
         ← History
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Ride details</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Ride details</h1>
 
       <div className="mt-8 space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         {[

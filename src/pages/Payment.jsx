@@ -331,7 +331,7 @@ export default function Payment() {
 
   if (error || !ride) {
     return (
-      <div className="mx-auto max-w-md p-6">
+      <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6">
         <p className="text-red-600">{error || 'Ride not found'}</p>
         <Link to="/dashboard" className="mt-4 inline-block text-emerald-600">
           ← Dashboard
@@ -341,11 +341,11 @@ export default function Payment() {
   }
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-28">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28">
       <Link to="/dashboard" className="text-sm font-medium text-emerald-600">
         ← Dashboard
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Payment</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Payment</h1>
       <p className="mt-2 text-slate-600">
         Pay with card or bank transfer for {ride.childName}&apos;s trip
       </p>

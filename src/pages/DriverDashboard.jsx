@@ -129,9 +129,9 @@ export default function DriverDashboard() {
   );
 
   return (
-    <div className="mx-auto max-w-lg p-6 pb-32">
+    <div className="mx-auto w-full max-w-lg px-4 py-6 sm:px-6 md:max-w-2xl lg:max-w-4xl pb-28 lg:pb-12">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-slate-900">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
           Welcome, {user?.name || user?.driverName || 'Driver'}
         </h1>
         <p className="mt-2 text-slate-600">
@@ -193,7 +193,7 @@ export default function DriverDashboard() {
           <p className="mb-3 text-sm text-slate-600">
             A parent chose you. Accept to take the trip, or decline to release it to the open pool.
           </p>
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {requests.map((ride) => (
               <RideCard key={ride.id} ride={ride} preferred />
             ))}
@@ -210,12 +210,12 @@ export default function DriverDashboard() {
         </Link>
       </div>
 
-      <div className="mb-8 space-y-3">
+      <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {openPool.map((ride) => (
           <RideCard key={ride.id} ride={ride} preferred={false} />
         ))}
         {openPool.length === 0 && (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500 sm:col-span-2">
             No open pool rides right now.
             {requests.length === 0
               ? ' Parents must pay before rides appear here.'

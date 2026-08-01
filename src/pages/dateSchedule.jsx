@@ -18,11 +18,11 @@ export default function DateSchedule() {
   };
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-28">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-xl pb-28 lg:pb-12">
       <Link to="/pick-locations" className="text-sm font-medium text-emerald-600">
         ← Back
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Date &amp; schedule</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Date &amp; schedule</h1>
       <p className="mt-2 text-slate-600">When should the driver arrive?</p>
 
       <div className="mt-8 space-y-5">

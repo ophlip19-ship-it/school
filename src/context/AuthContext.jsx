@@ -69,18 +69,45 @@ export const AuthProvider = ({ children }) => {
     return me;
   }, []);
 
+  const confirmIdentity = useCallback(async (password) => {
+    await authApi.confirmIdentity({ password });
+    return true;
+  }, []);
+
   const updateUser = useCallback(async (updates) => {
-    // Local-only fields vs API fields
-    if (updates.name || updates.phone || updates.vehiclePlate) {
+    const {
+      currentPassword,
+      name,
+      phone,
+      vehiclePlate,
+      homeAddress,
+      homeCoords,
+      ...localOnly
+    } = updates || {};
+
+    const hasProfileFields =
+      name !== undefined ||
+      phone !== undefined ||
+      vehiclePlate !== undefined ||
+      homeAddress !== undefined ||
+      homeCoords !== undefined;
+
+    if (hasProfileFields) {
       const { user: me } = await authApi.updateMe({
-        name: updates.name,
-        phone: updates.phone,
-        vehiclePlate: updates.vehiclePlate,
+        currentPassword,
+        name,
+        phone,
+        vehiclePlate,
+        homeAddress,
+        homeCoords,
       });
       setUser(me);
       return me;
     }
-    setUser((prev) => (prev ? { ...prev, ...updates } : prev));
+
+    if (Object.keys(localOnly).length > 0) {
+      setUser((prev) => (prev ? { ...prev, ...localOnly } : prev));
+    }
     return null;
   }, []);
 
@@ -102,11 +129,22 @@ export const AuthProvider = ({ children }) => {
       registerUser,
       login,
       updateUser,
+      confirmIdentity,
       refreshUser,
       verifyAccount,
       logout,
     }),
-    [user, isLoading, registerUser, login, updateUser, refreshUser, verifyAccount, logout],
+    [
+      user,
+      isLoading,
+      registerUser,
+      login,
+      updateUser,
+      confirmIdentity,
+      refreshUser,
+      verifyAccount,
+      logout,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

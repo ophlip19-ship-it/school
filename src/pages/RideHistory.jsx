@@ -16,15 +16,15 @@ export default function RideHistory() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-md p-6 pb-32">
+    <div className="mx-auto w-full max-w-md px-4 py-6 sm:px-6 md:max-w-2xl lg:max-w-3xl pb-28 lg:pb-12">
       <Link to="/dashboard" className="text-sm font-medium text-emerald-600">
         ← Dashboard
       </Link>
-      <h1 className="mt-4 text-3xl font-bold text-slate-900">Ride history</h1>
+      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Ride history</h1>
       <p className="mt-2 text-slate-600">Trips for {user?.childName || 'your children'}</p>
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
-      <div className="mt-8 space-y-3">
+      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {rides.map((ride) => (
           <Link
             key={ride.id}
@@ -54,7 +54,7 @@ export default function RideHistory() {
           </Link>
         ))}
         {rides.length === 0 && !error && (
-          <p className="text-center text-slate-500">No rides yet. Book your first trip!</p>
+          <p className="col-span-full text-center text-slate-500">No rides yet. Book your first trip!</p>
         )}
       </div>
     </div>
