@@ -18,7 +18,6 @@ import {
   Navigation,
   School,
   Map,
-  PanelBottom,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
@@ -28,7 +27,10 @@ import {
   captureParentLocationForBooking,
 } from '../lib/geo';
 import AddressSearchInput from '../components/AddressSearchInput';
-import DashboardDrawer from '../components/DashboardDrawer';
+import DashboardDrawer, {
+  HamburgerButton,
+} from '../components/DashboardDrawer';
+import { ErrorBanner } from '../components/ErrorState';
 import PageShell from '../components/PageShell';
 
 function ChildAvatar({ child, size = 'md' }) {
@@ -146,10 +148,87 @@ function SecondaryPanel({
   );
 }
 
+function ActiveRideCard({ ride }) {
+  const tone =
+    ride.status === 'requested'
+      ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20'
+      : ride.status === 'open' || ride.status === 'pending_payment'
+        ? 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-blue-600/20'
+        : 'bg-gradient-to-r from-emerald-600 to-teal-500 shadow-emerald-600/20';
+
+  const statusLabel =
+    ride.status === 'requested'
+      ? 'Waiting for driver'
+      : ride.status === 'open'
+        ? 'Finding a driver'
+        : ride.status === 'pending_payment'
+          ? 'Payment needed'
+          : `Active trip · ${ride.status}`;
+
+  return (
+    <div className={`rounded-3xl p-5 text-white shadow-lg sm:p-6 ${tone}`}>
+      <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
+        {statusLabel}
+      </p>
+      <h3 className="mt-2 text-xl font-bold sm:text-2xl">{ride.childName}</h3>
+      <div className="mt-4 space-y-1 text-sm text-white/90">
+        {ride.status === 'requested' ? (
+          <p>
+            Waiting for {ride.driverName || 'your chosen driver'} to accept this
+            ride…
+          </p>
+        ) : ride.status === 'open' ? (
+          <p>Looking for any available driver…</p>
+        ) : ride.status === 'pending_payment' ? (
+          <p>Complete payment to dispatch a driver for this trip.</p>
+        ) : (
+          <p>Driver: {ride.driverName || 'Waiting for driver…'}</p>
+        )}
+        <p className="flex items-center gap-2">
+          <Clock size={16} /> {ride.date} · {ride.time}
+        </p>
+        <p className="flex items-center gap-2">
+          <MapPin size={16} /> {ride.pickup}
+        </p>
+        {ride.paymentStatus === 'paid' &&
+          ['assigned', 'in_transit'].includes(ride.status) && (
+            <p>PIN: {ride.handoverPin}</p>
+          )}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {['assigned', 'in_transit'].includes(ride.status) && (
+          <Link
+            to={`/live-tracking?rideId=${ride.id}`}
+            className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700"
+          >
+            Track live
+          </Link>
+        )}
+        {ride.driverId && (
+          <Link
+            to={`/chat?rideId=${ride.id}`}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
+          >
+            <MessageSquare size={16} /> Chat
+          </Link>
+        )}
+        {ride.paymentStatus !== 'paid' && (
+          <Link
+            to={`/payment?rideId=${ride.id}`}
+            className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-amber-950"
+          >
+            Pay now
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function HomeDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [activeRide, setActiveRide] = useState(null);
+  const [activeRides, setActiveRides] = useState([]);
   const [rides, setRides] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [instantLoading, setInstantLoading] = useState(false);
@@ -172,7 +251,17 @@ export default function HomeDashboard() {
 
   useEffect(() => {
     const load = () => {
-      ridesApi.active().then(({ ride }) => setActiveRide(ride)).catch(() => {});
+      ridesApi
+        .active()
+        .then((res) => {
+          const list = Array.isArray(res.rides)
+            ? res.rides
+            : res.ride
+              ? [res.ride]
+              : [];
+          setActiveRides(list.filter(Boolean));
+        })
+        .catch(() => {});
       ridesApi
         .list()
         .then(({ rides: list }) => setRides(list.slice(0, 5)))
@@ -191,24 +280,23 @@ export default function HomeDashboard() {
     return () => clearInterval(t);
   }, []);
 
-  // Close mobile drawer when resizing to desktop
-  useEffect(() => {
-    const onResize = () => {
-      if (window.matchMedia('(min-width: 768px)').matches) {
-        setDrawerOpen(false);
-      }
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const childName = user?.childName || children[0]?.name || 'your child';
   const school = user?.school || children[0]?.school || 'School';
+  // Drivers already assigned to one of this parent's active trips stay selectable
+  // only if still marked available (server flags "On trip" drivers).
   const availableDrivers = drivers.filter((d) => d.available);
   const selectedDriver =
     availableDrivers.find((d) => d.id === selectedDriverId) ||
     availableDrivers[0] ||
     null;
+
+  const childHasActiveRide = (childId) =>
+    activeRides.some(
+      (r) =>
+        r.childId === childId ||
+        // fallback when childId missing on older payloads
+        (r.childName &&
+          children.find((c) => c.id === childId)?.name === r.childName),
+    );
 
   const bookInstant = async () => {
     setInstantError('');
@@ -216,12 +304,6 @@ export default function HomeDashboard() {
       children.find((c) => c.id === selectedChildId) || children[0];
     if (!child) {
       setInstantError('Add a child profile first, then book an instant ride.');
-      return;
-    }
-    if (activeRide) {
-      setInstantError(
-        'You already have an active trip. Track it or wait until it finishes.',
-      );
       return;
     }
     if (!selectedDriver) {
@@ -261,6 +343,11 @@ export default function HomeDashboard() {
         dropoffCoords: { lng: to.lng, lat: to.lat },
         parentLocation: parentLocation || undefined,
       });
+      // Optimistically surface the new trip so concurrent bookings stay visible
+      setActiveRides((prev) => {
+        const next = [ride, ...prev.filter((r) => r.id !== ride.id)];
+        return next;
+      });
       navigate(`/payment?rideId=${ride.id}`);
     } catch (err) {
       setInstantError(
@@ -280,25 +367,33 @@ export default function HomeDashboard() {
     instantLoading,
   };
 
-  const lastRide = rides[0];
-
   return (
     <PageShell width="lg" className="md:pb-10">
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-          Welcome back, {user?.name || user?.parentName || 'Parent'}
-        </h1>
-        <p className="mt-2 text-slate-600">
-          {availableDrivers.length > 0
-            ? `${availableDrivers.length} driver${availableDrivers.length === 1 ? '' : 's'} ready nearby`
-            : 'Book a ride for your child'}
-        </p>
-        {user?.homeAddress ? (
-          <p className="mt-1 flex items-start gap-1.5 text-sm text-slate-500">
-            <Home size={14} className="mt-0.5 shrink-0" />
-            <span className="line-clamp-2">{user.homeAddress}</span>
+      <div className="mb-6 flex items-start gap-3 sm:mb-8">
+        <HamburgerButton
+          open={drawerOpen}
+          onClick={() => setDrawerOpen((v) => !v)}
+          className="mt-0.5"
+        />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+            Welcome back, {user?.name || user?.parentName || 'Parent'}
+          </h1>
+          <p className="mt-2 text-slate-600">
+            {availableDrivers.length > 0
+              ? `${availableDrivers.length} driver${availableDrivers.length === 1 ? '' : 's'} ready nearby`
+              : 'Book a ride for your child'}
+            {activeRides.length > 0
+              ? ` · ${activeRides.length} active trip${activeRides.length === 1 ? '' : 's'}`
+              : ''}
           </p>
-        ) : null}
+          {user?.homeAddress ? (
+            <p className="mt-1 flex items-start gap-1.5 text-sm text-slate-500">
+              <Home size={14} className="mt-0.5 shrink-0" />
+              <span className="line-clamp-2">{user.homeAddress}</span>
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-10">
@@ -321,24 +416,45 @@ export default function HomeDashboard() {
               </div>
             </div>
 
-            {children.length > 1 && (
+            {children.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-2">
-                {children.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setSelectedChildId(c.id)}
-                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                      selectedChildId === c.id
-                        ? 'bg-white text-slate-900'
-                        : 'bg-white/10 text-white hover:bg-white/20'
-                    }`}
-                  >
-                    <ChildAvatar child={c} size="sm" />
-                    <span className="pr-1">{c.name}</span>
-                  </button>
-                ))}
+                {children.map((c) => {
+                  const busy = childHasActiveRide(c.id);
+                  const selected = selectedChildId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelectedChildId(c.id)}
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                        selected
+                          ? 'bg-white text-slate-900'
+                          : 'bg-white/10 text-white hover:bg-white/20'
+                      }`}
+                    >
+                      <ChildAvatar child={c} size="sm" />
+                      <span className="pr-1">{c.name}</span>
+                      {busy ? (
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            selected
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-white/20 text-emerald-100'
+                          }`}
+                        >
+                          Active
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
+            )}
+            {activeRides.length > 0 && (
+              <p className="mt-3 text-xs text-emerald-200/90">
+                You can book another ride while others are in progress — pick a
+                child and an available driver.
+              </p>
             )}
 
             <div className="mt-4 space-y-3">
@@ -494,9 +610,13 @@ export default function HomeDashboard() {
             </div>
 
             {instantError && (
-              <p className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100">
-                {instantError}
-              </p>
+              <ErrorBanner
+                variant="dark"
+                title="Couldn’t book ride"
+                message={instantError}
+                onDismiss={() => setInstantError('')}
+                className="mt-3"
+              />
             )}
 
             <button
@@ -516,7 +636,9 @@ export default function HomeDashboard() {
                   : availableDrivers.length === 0
                     ? 'No drivers available'
                     : selectedDriver
-                      ? `Book ${selectedDriver.name} · ${formatMoney(300000)}`
+                      ? activeRides.length > 0
+                        ? `Book another · ${selectedDriver.name} · ${formatMoney(300000)}`
+                        : `Book ${selectedDriver.name} · ${formatMoney(300000)}`
                       : `Book instant ride · ${formatMoney(300000)}`}
             </button>
             <Link
@@ -527,76 +649,22 @@ export default function HomeDashboard() {
             </Link>
           </div>
 
-          {activeRide ? (
-            <div
-              className={`rounded-3xl p-5 text-white shadow-lg sm:p-6 ${
-                activeRide.status === 'requested'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20'
-                  : activeRide.status === 'open'
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-blue-600/20'
-                    : 'bg-gradient-to-r from-emerald-600 to-teal-500 shadow-emerald-600/20'
-              }`}
-            >
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
-                {activeRide.status === 'requested'
-                  ? 'Waiting for driver'
-                  : activeRide.status === 'open'
-                    ? 'Finding a driver'
-                    : `Active trip · ${activeRide.status}`}
-              </p>
-              <h3 className="mt-2 text-xl font-bold sm:text-2xl">
-                {activeRide.childName}
-              </h3>
-              <div className="mt-4 space-y-1 text-sm text-white/90">
-                {activeRide.status === 'requested' ? (
-                  <p>
-                    Waiting for {activeRide.driverName || 'your chosen driver'}{' '}
-                    to accept this ride…
-                  </p>
-                ) : activeRide.status === 'open' ? (
-                  <p>Looking for any available driver…</p>
-                ) : (
-                  <p>
-                    Driver: {activeRide.driverName || 'Waiting for driver…'}
-                  </p>
-                )}
-                <p className="flex items-center gap-2">
-                  <Clock size={16} /> {activeRide.date} · {activeRide.time}
+          {activeRides.length > 0 ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xl font-bold text-slate-900">
+                  Active trips
+                  <span className="ml-2 text-base font-semibold text-slate-400">
+                    ({activeRides.length})
+                  </span>
+                </h2>
+                <p className="text-xs font-medium text-slate-500">
+                  Book more anytime
                 </p>
-                <p className="flex items-center gap-2">
-                  <MapPin size={16} /> {activeRide.pickup}
-                </p>
-                {activeRide.paymentStatus === 'paid' &&
-                  ['assigned', 'in_transit'].includes(activeRide.status) && (
-                    <p>PIN: {activeRide.handoverPin}</p>
-                  )}
               </div>
-              <div className="mt-5 flex flex-wrap gap-2">
-                {['assigned', 'in_transit'].includes(activeRide.status) && (
-                  <Link
-                    to={`/live-tracking?rideId=${activeRide.id}`}
-                    className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700"
-                  >
-                    Track live
-                  </Link>
-                )}
-                {activeRide.driverId && (
-                  <Link
-                    to={`/chat?rideId=${activeRide.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
-                  >
-                    <MessageSquare size={16} /> Chat
-                  </Link>
-                )}
-                {activeRide.paymentStatus !== 'paid' && (
-                  <Link
-                    to={`/payment?rideId=${activeRide.id}`}
-                    className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-amber-950"
-                  >
-                    Pay now
-                  </Link>
-                )}
-              </div>
+              {activeRides.map((ride) => (
+                <ActiveRideCard key={ride.id} ride={ride} />
+              ))}
             </div>
           ) : null}
 
@@ -748,7 +816,7 @@ export default function HomeDashboard() {
           </div>
         </div>
 
-        {/* Desktop secondary column — recent rides & below */}
+        {/* Desktop secondary column — recent rides & shortcuts */}
         <aside className="hidden lg:col-span-2 lg:block">
           <div className="sticky top-20 rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm backdrop-blur">
             <SecondaryPanel {...secondaryProps} />
@@ -756,43 +824,21 @@ export default function HomeDashboard() {
         </aside>
       </div>
 
-      {/* Tablet (md–lg): secondary inline below primary */}
-      <div className="mt-8 hidden md:block lg:hidden">
-        <SecondaryPanel {...secondaryProps} />
-      </div>
-
-      {/* Mobile: secondary content in bottom drawer */}
-      <div className="md:hidden">
-        {/* Spacer so content isn't hidden under the peek bar + bottom nav */}
-        <div className="h-28" aria-hidden />
-        <DashboardDrawer
-          open={drawerOpen}
-          onToggle={() => setDrawerOpen((v) => !v)}
-          onClose={() => setDrawerOpen(false)}
-          title="Activity & shortcuts"
-          summary={
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                <PanelBottom size={18} />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900">
-                  Recent rides &amp; more
-                </p>
-                <p className="truncate text-xs text-slate-500">
-                  {lastRide
-                    ? `${lastRide.childName} · ${lastRide.status}`
-                    : `No recent trips for ${childName}`}
-                  {' · '}
-                  Swipe up
-                </p>
-              </div>
-            </div>
-          }
-        >
-          <SecondaryPanel {...secondaryProps} />
-        </DashboardDrawer>
-      </div>
+      {/* Left sidebar drawer — hamburger menu (all breakpoints) */}
+      <DashboardDrawer
+        open={drawerOpen}
+        onToggle={() => setDrawerOpen((v) => !v)}
+        onClose={() => setDrawerOpen(false)}
+        title="Activity & shortcuts"
+      >
+        <SecondaryPanel
+          {...secondaryProps}
+          bookInstant={() => {
+            setDrawerOpen(false);
+            bookInstant();
+          }}
+        />
+      </DashboardDrawer>
     </PageShell>
   );
 }

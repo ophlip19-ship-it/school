@@ -73,16 +73,35 @@ router.get('/available', requireAuth, requireRole('driver'), async (req, res) =>
 
 router.get('/active', requireAuth, async (req, res) => {
   try {
-    let ride = null;
+    // Parents may book and track multiple rides at once (e.g. siblings).
+    // Drivers still work one assigned trip at a time.
     if (req.user.role === 'parent') {
-      ride = await Ride.findOne({
+      const list = await Ride.find({
         parentId: req.user.id,
-        status: { $in: ['open', 'requested', 'assigned', 'in_transit'] },
+        status: {
+          $in: [
+            'pending_payment',
+            'open',
+            'requested',
+            'assigned',
+            'in_transit',
+          ],
+        },
       })
         .sort({ updatedAt: -1 })
         .populate('parentId', 'name phone')
         .populate('driverId', 'name phone vehiclePlate');
-    } else if (req.user.role === 'driver') {
+
+      const rides = list.map((r) => mapRideForViewer(r, req.user));
+      return res.json({
+        rides,
+        // Backward-compatible single ride (most recently updated)
+        ride: rides[0] || null,
+      });
+    }
+
+    let ride = null;
+    if (req.user.role === 'driver') {
       ride = await Ride.findOne({
         driverId: req.user.id,
         status: { $in: ['assigned', 'in_transit'] },
@@ -91,7 +110,8 @@ router.get('/active', requireAuth, async (req, res) => {
         .populate('parentId', 'name phone')
         .populate('driverId', 'name phone vehiclePlate');
     }
-    res.json({ ride: mapRideForViewer(ride, req.user) });
+    const mapped = mapRideForViewer(ride, req.user);
+    res.json({ ride: mapped, rides: mapped ? [mapped] : [] });
   } catch (err) {
     console.error('[rides/active]', err);
     res.status(500).json({ error: 'Failed to get active ride' });

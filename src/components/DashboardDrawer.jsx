@@ -1,14 +1,13 @@
 import { useEffect } from 'react';
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 
 /**
- * Mobile secondary panel for parent dashboard (bottom sheet).
- * On md+ screens, content is expected to render inline — this is mobile-only.
+ * Left sidebar drawer for parent dashboard secondary content.
+ * Opens via hamburger control; locks body scroll while open on small screens.
  *
  * @param {boolean} props.open
  * @param {() => void} props.onToggle
  * @param {() => void} [props.onClose]
- * @param {React.ReactNode} props.summary — collapsed peek bar
  * @param {React.ReactNode} props.children
  * @param {string} [props.title]
  */
@@ -16,74 +15,84 @@ export default function DashboardDrawer({
   open,
   onToggle,
   onClose,
-  summary,
   children,
-  title = 'More',
+  title = 'Menu',
 }) {
-  // Lock body scroll when fully open on small screens
+  const close = onClose || onToggle;
+
   useEffect(() => {
     if (!open) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, close]);
 
   return (
     <>
-      {/* Dim overlay when expanded */}
       {open && (
         <button
           type="button"
-          aria-label="Close drawer"
-          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
-          onClick={onClose || onToggle}
+          aria-label="Close menu"
+          className="fixed inset-0 z-40 bg-slate-900/45 backdrop-blur-[2px] transition-opacity lg:bg-slate-900/30"
+          onClick={close}
         />
       )}
 
-      <div
-        className={`fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-3xl bg-white shadow-[0_-12px_40px_rgba(15,23,42,0.2)] transition-[height,max-height] duration-300 ease-out md:hidden ${
-          open ? 'h-[min(78vh,640px)]' : 'h-auto'
+      <aside
+        className={`fixed top-0 left-0 z-50 flex h-full w-[min(88vw,320px)] flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          open ? 'translate-x-0' : '-translate-x-full'
         }`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         role="dialog"
         aria-modal={open}
         aria-label={title}
+        aria-hidden={!open}
       >
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-label={open ? 'Collapse secondary panel' : 'Expand secondary panel'}
-          className="flex w-full flex-col items-center px-4 pt-2.5 pb-2"
-        >
-          <span className="mb-2 h-1.5 w-12 rounded-full bg-slate-300" />
-          <div className="flex w-full items-center gap-2 text-left">
-            <div className="min-w-0 flex-1">{summary}</div>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
-              {open ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5 sm:px-5">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <Menu size={18} aria-hidden />
             </span>
+            <h2 className="text-lg font-bold text-slate-900">{title}</h2>
           </div>
-        </button>
+          <button
+            type="button"
+            onClick={close}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
-        {open && (
-          <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-1 sm:px-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-              <button
-                type="button"
-                onClick={onClose || onToggle}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            {children}
-          </div>
-        )}
-      </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5">
+          {children}
+        </div>
+      </aside>
     </>
+  );
+}
+
+/**
+ * Hamburger control that opens the left drawer.
+ */
+export function HamburgerButton({ open, onClick, className = '' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-label={open ? 'Close menu' : 'Open menu'}
+      className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 ${className}`}
+    >
+      {open ? <X size={22} strokeWidth={2.25} /> : <Menu size={22} strokeWidth={2.25} />}
+    </button>
   );
 }

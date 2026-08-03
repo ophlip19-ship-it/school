@@ -39,6 +39,8 @@ import DriverAvailableRides from './pages/DriverAvailableRides';
 import DriverTripActive from './pages/DriverTripActive';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import ErrorState, { NotFoundScreen } from './components/ErrorState';
+import { Home, ArrowLeft } from 'lucide-react';
 
 // Mapbox is heavy — load only when opening live tracking / admin transit map
 const LiveTracking = lazy(() => import('./pages/LiveTracking'));
@@ -49,6 +51,30 @@ function ScreenLoader() {
     <div className="flex min-h-screen items-center justify-center text-slate-500">
       Loading…
     </div>
+  );
+}
+
+function ForbiddenScreen({ homeTo = '/dashboard' }) {
+  return (
+    <ErrorState
+      variant="forbidden"
+      code="403"
+      title="You don’t have access"
+      message="This area is for a different SchoolRun role. Head back to your home screen to continue."
+      actions={[
+        {
+          label: 'Go to my home',
+          to: homeTo,
+          primary: true,
+          icon: <Home size={16} />,
+        },
+        {
+          label: 'Go back',
+          onClick: () => window.history.back(),
+          icon: <ArrowLeft size={16} />,
+        },
+      ]}
+    />
   );
 }
 
@@ -64,9 +90,13 @@ function ProtectedRoute({ children, roles }) {
   }
 
   if (roles && user?.role && !roles.includes(user.role)) {
-    const fallback =
-      user.role === 'driver' ? '/driver' : user.role === 'admin' ? '/admin' : '/dashboard';
-    return <Navigate to={fallback} replace />;
+    const homeTo =
+      user.role === 'driver'
+        ? '/driver'
+        : user.role === 'admin'
+          ? '/admin'
+          : '/dashboard';
+    return <ForbiddenScreen homeTo={homeTo} />;
   }
 
   return children;
@@ -249,7 +279,12 @@ function AppRoutes() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="*"
+          element={
+            <NotFoundScreen homeTo="/" />
+          }
+        />
       </Routes>
     </AppShell>
   );
