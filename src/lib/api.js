@@ -71,6 +71,8 @@ export const ridesApi = {
   create: (body) => api("/rides", { method: "POST", body }),
   accept: (id) => api(`/rides/${id}/accept`, { method: "POST", body: {} }),
   reject: (id) => api(`/rides/${id}/reject`, { method: "POST", body: {} }),
+  /** Parent: cancel before a driver accepts (pending_payment | open | requested) */
+  cancel: (id) => api(`/rides/${id}/cancel`, { method: "POST", body: {} }),
   setStatus: (id, status) =>
     api(`/rides/${id}/status`, { method: "PATCH", body: { status } }),
   getLocation: (id) => api(`/rides/${id}/location`),

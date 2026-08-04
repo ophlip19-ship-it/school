@@ -148,7 +148,11 @@ function SecondaryPanel({
   );
 }
 
-function ActiveRideCard({ ride }) {
+/** Parent can cancel only before a driver accepts */
+const canParentCancel = (status) =>
+  ['pending_payment', 'open', 'requested'].includes(status);
+
+function ActiveRideCard({ ride, onCancel, cancelling }) {
   const tone =
     ride.status === 'requested'
       ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20'
@@ -164,6 +168,8 @@ function ActiveRideCard({ ride }) {
         : ride.status === 'pending_payment'
           ? 'Payment needed'
           : `Active trip · ${ride.status}`;
+
+  const showCancel = canParentCancel(ride.status);
 
   return (
     <div className={`rounded-3xl p-5 text-white shadow-lg sm:p-6 ${tone}`}>
@@ -194,6 +200,11 @@ function ActiveRideCard({ ride }) {
           ['assigned', 'in_transit'].includes(ride.status) && (
             <p>PIN: {ride.handoverPin}</p>
           )}
+        {showCancel && (
+          <p className="pt-1 text-xs text-white/75">
+            You can cancel this trip until a driver accepts.
+          </p>
+        )}
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
         {['assigned', 'in_transit'].includes(ride.status) && (
@@ -204,7 +215,7 @@ function ActiveRideCard({ ride }) {
             Track live
           </Link>
         )}
-        {ride.driverId && (
+        {ride.driverId && ['assigned', 'in_transit'].includes(ride.status) && (
           <Link
             to={`/chat?rideId=${ride.id}`}
             className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
@@ -212,13 +223,23 @@ function ActiveRideCard({ ride }) {
             <MessageSquare size={16} /> Chat
           </Link>
         )}
-        {ride.paymentStatus !== 'paid' && (
+        {ride.paymentStatus !== 'paid' && ride.status !== 'cancelled' && (
           <Link
             to={`/payment?rideId=${ride.id}`}
             className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-amber-950"
           >
             Pay now
           </Link>
+        )}
+        {showCancel && (
+          <button
+            type="button"
+            disabled={cancelling}
+            onClick={() => onCancel?.(ride)}
+            className="rounded-xl border border-white/40 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel trip'}
+          </button>
         )}
       </div>
     </div>
@@ -240,6 +261,8 @@ export default function HomeDashboard() {
   const [customDropoff, setCustomDropoff] = useState('');
   const [customDropoffPlace, setCustomDropoffPlace] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [cancelError, setCancelError] = useState('');
 
   const children = user?.children || [];
 
@@ -297,6 +320,43 @@ export default function HomeDashboard() {
         (r.childName &&
           children.find((c) => c.id === childId)?.name === r.childName),
     );
+
+  const cancelRide = async (ride) => {
+    if (!ride?.id || cancellingId) return;
+    const label =
+      ride.status === 'pending_payment'
+        ? 'Cancel this unpaid trip?'
+        : 'Cancel this trip before a driver accepts?';
+    if (!window.confirm(label)) return;
+
+    setCancelError('');
+    setCancellingId(ride.id);
+    try {
+      await ridesApi.cancel(ride.id);
+      setActiveRides((prev) => prev.filter((r) => r.id !== ride.id));
+      // Refresh recent list so cancelled status shows in history
+      ridesApi
+        .list()
+        .then(({ rides: list }) => setRides(list.slice(0, 5)))
+        .catch(() => {});
+    } catch (err) {
+      setCancelError(err.message || 'Could not cancel trip');
+      // Ride may have been accepted in the meantime — refresh active list
+      ridesApi
+        .active()
+        .then((res) => {
+          const list = Array.isArray(res.rides)
+            ? res.rides
+            : res.ride
+              ? [res.ride]
+              : [];
+          setActiveRides(list.filter(Boolean));
+        })
+        .catch(() => {});
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   const bookInstant = async () => {
     setInstantError('');
@@ -662,8 +722,20 @@ export default function HomeDashboard() {
                   Book more anytime
                 </p>
               </div>
+              {cancelError && (
+                <ErrorBanner
+                  title="Couldn’t cancel trip"
+                  message={cancelError}
+                  onDismiss={() => setCancelError('')}
+                />
+              )}
               {activeRides.map((ride) => (
-                <ActiveRideCard key={ride.id} ride={ride} />
+                <ActiveRideCard
+                  key={ride.id}
+                  ride={ride}
+                  onCancel={cancelRide}
+                  cancelling={cancellingId === ride.id}
+                />
               ))}
             </div>
           ) : null}

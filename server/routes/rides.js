@@ -513,12 +513,88 @@ router.get('/:id/location', requireAuth, async (req, res) => {
   }
 });
 
+/** Statuses where the parent may cancel before a driver has accepted */
+const PARENT_CANCELLABLE = ['pending_payment', 'open', 'requested'];
+
+/**
+ * Parent cancels a trip before any driver accepts.
+ * Allowed only while status is pending_payment, open, or requested.
+ */
+router.post('/:id/cancel', requireAuth, requireRole('parent'), async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id);
+    if (!ride) return res.status(404).json({ error: 'Ride not found' });
+
+    if (ride.parentId?.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (ride.status === 'cancelled') {
+      const updated = await findRidePopulated({ _id: ride._id });
+      return res.json({ ride: mapRide(updated), alreadyCancelled: true });
+    }
+
+    if (!PARENT_CANCELLABLE.includes(ride.status)) {
+      return res.status(400).json({
+        error:
+          ride.status === 'assigned' || ride.status === 'in_transit'
+            ? 'A driver has already accepted this trip. Cancel is only available before accept.'
+            : 'This trip can no longer be cancelled',
+      });
+    }
+
+    const previousStatus = ride.status;
+    const preferredDriverId = ride.driverId?.toString() || null;
+
+    ride.status = 'cancelled';
+    ride.locationSharing = false;
+    pushTransitFeed(
+      ride,
+      'cancelled',
+      previousStatus === 'pending_payment'
+        ? 'Trip cancelled by parent before payment.'
+        : 'Trip cancelled by parent before a driver accepted.',
+    );
+    await ride.save();
+
+    const updated = await findRidePopulated({ _id: ride._id });
+    const mapped = mapRide(updated);
+    const io = req.app.get('io');
+    if (io) {
+      const statusPayload = {
+        rideId: mapped.id,
+        status: mapped.status,
+        locationSharing: false,
+        cancelledBy: 'parent',
+        previousStatus,
+        transitFeed: mapped.transitFeed,
+        driverLocation: null,
+        trail: [],
+      };
+      io.to(`ride:${mapped.id}`).emit('ride:status', statusPayload);
+      // Notify preferred driver (if any) so their available list can refresh
+      if (preferredDriverId) {
+        io.to(`user:${preferredDriverId}`).emit('ride:cancelled', statusPayload);
+      }
+      io.to('drivers:available').emit('ride:cancelled', statusPayload);
+    }
+
+    res.json({ ride: mapped });
+  } catch (err) {
+    console.error('[rides cancel]', err);
+    res.status(500).json({ error: 'Failed to cancel ride' });
+  }
+});
+
 router.post('/:id/accept', requireAuth, requireRole('driver'), async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ error: 'Ride not found' });
     if (ride.paymentStatus !== 'paid') {
       return res.status(400).json({ error: 'Ride is not paid yet' });
+    }
+    if (ride.status === 'cancelled') {
+      return res.status(400).json({ error: 'This ride was cancelled by the parent' });
     }
 
     const isOpenPool = ride.status === 'open' && !ride.driverId;
@@ -584,6 +660,20 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
     const isDriver = ride.driverId?.toString() === req.user.id;
     if (req.user.role !== 'admin' && !isParent && !isDriver) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Parents may only cancel before a driver accepts (use dedicated cancel route preferred)
+    if (req.user.role === 'parent' && status === 'cancelled') {
+      if (!PARENT_CANCELLABLE.includes(ride.status)) {
+        return res.status(400).json({
+          error:
+            'You can only cancel a trip before a driver accepts. Once assigned, contact support if needed.',
+        });
+      }
+    } else if (req.user.role === 'parent' && status !== 'cancelled') {
+      return res.status(403).json({
+        error: 'Parents can only cancel trips, not change other statuses',
+      });
     }
 
     // Drivers may only advance assigned/in_transit rides they own

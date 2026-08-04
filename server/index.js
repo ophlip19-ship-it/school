@@ -120,6 +120,14 @@ async function canAccessRide(socketUser, rideId) {
 }
 
 io.on('connection', (socket) => {
+  // Personal room for targeted notifications (e.g. preferred-driver cancel)
+  if (socket.user?.id) {
+    socket.join(`user:${socket.user.id}`);
+  }
+  if (socket.user?.role === 'driver') {
+    socket.join('drivers:available');
+  }
+
   socket.on('chat:join', async ({ rideId }) => {
     if (!rideId) return;
     try {
