@@ -9,8 +9,56 @@ import {
   pushTransitFeed,
   mapTransitRide,
 } from '../utils/mappers.js';
+import {
+  calculateFare,
+  haversineKm,
+  pickNearestDriver,
+  pricingDefaults,
+} from '../utils/pricing.js';
 
 const router = Router();
+
+/**
+ * Active (not suspended) drivers with no assigned/in-transit ride.
+ * Optionally ranked by distance to a target point.
+ */
+async function listAvailableDriversNear(targetCoords = null) {
+  const drivers = await User.find({
+    role: 'driver',
+    suspended: { $ne: true },
+  }).lean();
+
+  const free = [];
+  for (const d of drivers) {
+    const activeCount = await Ride.countDocuments({
+      driverId: d._id,
+      status: { $in: ['assigned', 'in_transit'] },
+    });
+    if (activeCount === 0) free.push(d);
+  }
+
+  if (!targetCoords || free.length === 0) {
+    return free.map((d) => ({
+      ...d,
+      distanceToPickupKm: null,
+    }));
+  }
+
+  return free
+    .map((d) => {
+      const km = haversineKm(d.lastLocation, targetCoords);
+      return {
+        ...d,
+        distanceToPickupKm:
+          km != null ? Math.round(km * 100) / 100 : null,
+      };
+    })
+    .sort((a, b) => {
+      const da = a.distanceToPickupKm ?? Infinity;
+      const db = b.distanceToPickupKm ?? Infinity;
+      return da - db;
+    });
+}
 
 async function findRidePopulated(filter) {
   return Ride.findOne(filter)
@@ -118,6 +166,44 @@ router.get('/active', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * Preview dynamic fare from pickup → dropoff (distance + local fuel).
+ * GET /api/rides/quote?pickupLng=&pickupLat=&dropoffLng=&dropoffLat=&distanceKm=
+ * or POST body with the same fields.
+ */
+async function handleQuote(req, res) {
+  try {
+    const src = { ...(req.query || {}), ...(req.body || {}) };
+    const pickupCoords = parseCoords({
+      lng: src.pickupLng ?? src.lng ?? src.pickup?.lng,
+      lat: src.pickupLat ?? src.lat ?? src.pickup?.lat,
+    }) || parseCoords(src.pickupCoords);
+    const dropoffCoords = parseCoords({
+      lng: src.dropoffLng ?? src.dropoff?.lng,
+      lat: src.dropoffLat ?? src.dropoff?.lat,
+    }) || parseCoords(src.dropoffCoords);
+
+    const quote = calculateFare({
+      pickupCoords,
+      dropoffCoords,
+      distanceKm: src.distanceKm,
+    });
+
+    res.json({
+      ...quote,
+      defaults: pricingDefaults(),
+      pickupCoords,
+      dropoffCoords,
+    });
+  } catch (err) {
+    console.error('[rides/quote]', err);
+    res.status(500).json({ error: 'Failed to quote fare' });
+  }
+}
+
+router.get('/quote', requireAuth, requireRole('parent', 'admin'), handleQuote);
+router.post('/quote', requireAuth, requireRole('parent', 'admin'), handleQuote);
+
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const ride = await findRidePopulated({ _id: req.params.id });
@@ -164,9 +250,11 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       date,
       time,
       tripType = 'pickup',
-      fareCents = 250000,
+      distanceKm = null,
       instant = false,
       driverId = null,
+      /** choose | nearest | pool — parent choice vs auto nearest vs open pool */
+      assignMode: rawAssignMode = null,
     } = req.body || {};
 
     if (!childId) {
@@ -179,21 +267,15 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     });
     if (!child) return res.status(400).json({ error: 'Invalid child' });
 
-    // Optional preferred driver — parent may pick any active (non-suspended) driver
-    let preferredDriverId = null;
-    if (driverId) {
-      const driver = await User.findOne({
-        _id: driverId,
-        role: 'driver',
-        suspended: { $ne: true },
-      });
-      if (!driver) {
-        return res.status(400).json({
-          error: 'Selected driver is not available. Pick another driver.',
-        });
-      }
-      preferredDriverId = driver._id;
+    // Resolve assignment mode
+    let assignMode = String(rawAssignMode || '').toLowerCase();
+    if (!['choose', 'nearest', 'pool'].includes(assignMode)) {
+      if (driverId) assignMode = 'choose';
+      else assignMode = 'nearest'; // default: auto nearest when no driver picked
     }
+
+    let preferredDriverId = null;
+    let nearestMeta = null;
 
     const parent = await User.findById(req.user.id).select(
       'homeAddress homeCoords',
@@ -238,6 +320,44 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     if (!fromCoords) fromCoords = { lng: 3.4734, lat: 6.4474 };
     if (!toCoords) toCoords = { lng: 3.4219, lat: 6.4281 };
 
+    if (assignMode === 'choose') {
+      if (!driverId) {
+        return res.status(400).json({
+          error: 'Pick a driver, or choose automatic nearest assignment.',
+        });
+      }
+      const driver = await User.findOne({
+        _id: driverId,
+        role: 'driver',
+        suspended: { $ne: true },
+      });
+      if (!driver) {
+        return res.status(400).json({
+          error: 'Selected driver is not available. Pick another driver.',
+        });
+      }
+      preferredDriverId = driver._id;
+    } else if (assignMode === 'nearest') {
+      // Provisional nearest pick at booking (re-checked on payment for freshness)
+      const free = await listAvailableDriversNear(fromCoords);
+      const picked = pickNearestDriver(free, fromCoords);
+      if (picked?.driver) {
+        preferredDriverId = picked.driver._id;
+        nearestMeta = {
+          driverId: picked.driver._id.toString(),
+          distanceKm: picked.distanceKm,
+          name: picked.driver.name,
+        };
+      } else {
+        // No free drivers with GPS — fall back to open pool after pay
+        assignMode = 'pool';
+        preferredDriverId = null;
+      }
+    } else {
+      // pool — any driver after payment
+      preferredDriverId = null;
+    }
+
     // Parent shares live GPS with the driver at booking time
     const parentCoords = parseCoords(parentLocation);
     let parentLoc = null;
@@ -264,12 +384,20 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       });
     }
 
+    // Server-authoritative dynamic fare (distance + local fuel cost)
+    const fare = calculateFare({
+      pickupCoords: fromCoords,
+      dropoffCoords: toCoords,
+      distanceKm,
+    });
+
     const pin = String(Math.floor(1000 + Math.random() * 9000));
     const created = await Ride.create({
       parentId: req.user.id,
       childId: child._id,
       childName: child.name,
       driverId: preferredDriverId,
+      assignMode,
       pickup: String(ridePickup).trim(),
       dropoff: String(rideDropoff).trim(),
       pickupCoords: fromCoords,
@@ -292,14 +420,21 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       rideTime,
       tripType: instant ? tripType || 'pickup' : tripType,
       status: 'pending_payment',
-      fareCents: Number(fareCents) || (instant ? 300000 : 250000),
+      fareCents: fare.fareCents,
+      distanceKm: fare.distanceKm,
+      fuelPricePerLiter: fare.fuelPricePerLiter,
+      fareBreakdown: fare.breakdown,
       currency: 'ngn',
       handoverPin: pin,
       paymentStatus: 'unpaid',
     });
 
     const ride = await findRidePopulated({ _id: created._id });
-    res.status(201).json({ ride: mapRide(ride) });
+    res.status(201).json({
+      ride: mapRide(ride),
+      fare,
+      nearestDriver: nearestMeta,
+    });
   } catch (err) {
     console.error('[rides POST]', err);
     res.status(500).json({ error: 'Failed to create ride' });

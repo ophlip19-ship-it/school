@@ -25,7 +25,11 @@ import {
   resolveDestination,
   resolvePickup,
   captureParentLocationForBooking,
+  formatDistanceKm,
+  DEFAULT_HOME,
+  DEFAULT_SCHOOL,
 } from '../lib/geo';
+import { quoteTripFare } from '../lib/pricing';
 import AddressSearchInput from '../components/AddressSearchInput';
 import DashboardDrawer, {
   HamburgerButton,
@@ -256,6 +260,8 @@ export default function HomeDashboard() {
   const [instantError, setInstantError] = useState('');
   const [selectedChildId, setSelectedChildId] = useState(null);
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  /** choose = pick a driver · nearest = auto-assign closest free driver */
+  const [assignMode, setAssignMode] = useState('nearest');
   const [pickupMode, setPickupMode] = useState('home'); // home | current
   const [dropoffMode, setDropoffMode] = useState('school'); // school | custom
   const [customDropoff, setCustomDropoff] = useState('');
@@ -263,6 +269,8 @@ export default function HomeDashboard() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState('');
+  const [fareQuote, setFareQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
 
   const children = user?.children || [];
 
@@ -292,18 +300,84 @@ export default function HomeDashboard() {
     };
     load();
     const t = setInterval(load, 10000);
-    driversApi
-      .active()
-      .then(({ drivers: list }) => {
-        setDrivers(list);
-        const firstAvailable = list.find((d) => d.available);
-        if (firstAvailable) setSelectedDriverId(firstAvailable.id);
-      })
-      .catch(() => setDrivers([]));
     return () => clearInterval(t);
   }, []);
 
   const school = user?.school || children[0]?.school || 'School';
+  const selectedChild =
+    children.find((c) => c.id === selectedChildId) || children[0] || null;
+
+  // Preview fare whenever pickup / dropoff choices change
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (dropoffMode === 'custom' && !customDropoffPlace) {
+        setFareQuote(null);
+        return;
+      }
+      setQuoteLoading(true);
+      try {
+        const from = await resolvePickup({
+          mode: pickupMode === 'current' ? 'current' : 'home',
+          homeAddress: user?.homeAddress || DEFAULT_HOME.label,
+          homeCoords: user?.homeCoords,
+        });
+        const to = await resolveDestination({
+          mode: dropoffMode === 'custom' ? 'custom' : 'school',
+          schoolName: selectedChild?.school || school,
+          customLabel: customDropoff.trim(),
+          customCoords: customDropoffPlace,
+        });
+        if (cancelled) return;
+        const quote = await quoteTripFare(
+          { lng: from.lng, lat: from.lat },
+          { lng: to.lng, lat: to.lat },
+        );
+        if (!cancelled) setFareQuote(quote);
+        // Rank free drivers by distance to pickup
+        driversApi
+          .active({ lng: from.lng, lat: from.lat })
+          .then(({ drivers: list }) => {
+            if (cancelled) return;
+            setDrivers(list);
+            setSelectedDriverId((prev) => {
+              if (prev && list.some((d) => d.id === prev && d.available)) {
+                return prev;
+              }
+              return list.find((d) => d.available)?.id || null;
+            });
+          })
+          .catch(() => {
+            if (!cancelled) setDrivers([]);
+          });
+      } catch {
+        if (!cancelled) {
+          // Still show a baseline quote from defaults
+          const quote = await quoteTripFare(
+            user?.homeCoords || DEFAULT_HOME,
+            DEFAULT_SCHOOL,
+          );
+          setFareQuote(quote);
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pickupMode,
+    dropoffMode,
+    customDropoff,
+    customDropoffPlace,
+    selectedChild?.school,
+    school,
+    user?.homeAddress,
+    user?.homeCoords,
+  ]);
+
   // Drivers already assigned to one of this parent's active trips stay selectable
   // only if still marked available (server flags "On trip" drivers).
   const availableDrivers = drivers.filter((d) => d.available);
@@ -311,6 +385,7 @@ export default function HomeDashboard() {
     availableDrivers.find((d) => d.id === selectedDriverId) ||
     availableDrivers[0] ||
     null;
+  const displayFareCents = fareQuote?.fareCents ?? null;
 
   const childHasActiveRide = (childId) =>
     activeRides.some(
@@ -366,8 +441,8 @@ export default function HomeDashboard() {
       setInstantError('Add a child profile first, then book an instant ride.');
       return;
     }
-    if (!selectedDriver) {
-      setInstantError('Pick an available driver to book an instant ride.');
+    if (assignMode === 'choose' && !selectedDriver) {
+      setInstantError('Pick an available driver, or switch to Auto · nearest.');
       return;
     }
 
@@ -392,15 +467,26 @@ export default function HomeDashboard() {
         customCoords: customDropoffPlace,
       });
 
+      // Fresh quote at book time (server recomputes authoritatively)
+      const quote = await quoteTripFare(
+        { lng: from.lng, lat: from.lat },
+        { lng: to.lng, lat: to.lat },
+      );
+
       const { ride } = await ridesApi.create({
         childId: child.id,
-        driverId: selectedDriver.id,
+        assignMode,
+        driverId:
+          assignMode === 'choose' && selectedDriver
+            ? selectedDriver.id
+            : undefined,
         instant: true,
         tripType: 'pickup',
         pickup: from.label,
         dropoff: to.label,
         pickupCoords: { lng: from.lng, lat: from.lat },
         dropoffCoords: { lng: to.lng, lat: to.lat },
+        distanceKm: quote?.distanceKm ?? undefined,
         parentLocation: parentLocation || undefined,
       });
       // Optimistically surface the new trip so concurrent bookings stay visible
@@ -513,7 +599,7 @@ export default function HomeDashboard() {
             {activeRides.length > 0 && (
               <p className="mt-3 text-xs text-emerald-200/90">
                 You can book another ride while others are in progress — pick a
-                child and an available driver.
+                child, then choose a driver or auto-assign the nearest one.
               </p>
             )}
 
@@ -601,9 +687,61 @@ export default function HomeDashboard() {
 
             <div className="mt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
-                Choose your driver
+                Driver assignment
               </p>
-              {availableDrivers.length > 0 ? (
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssignMode('nearest')}
+                  className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                    assignMode === 'nearest'
+                      ? 'bg-white font-semibold text-slate-900'
+                      : 'bg-white/10 text-white hover:bg-white/15'
+                  }`}
+                >
+                  <span className="block">Auto · nearest</span>
+                  <span
+                    className={`mt-0.5 block text-[11px] font-normal ${
+                      assignMode === 'nearest'
+                        ? 'text-slate-500'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    Closest free driver by GPS
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignMode('choose')}
+                  className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                    assignMode === 'choose'
+                      ? 'bg-white font-semibold text-slate-900'
+                      : 'bg-white/10 text-white hover:bg-white/15'
+                  }`}
+                >
+                  <span className="block">Choose driver</span>
+                  <span
+                    className={`mt-0.5 block text-[11px] font-normal ${
+                      assignMode === 'choose'
+                        ? 'text-slate-500'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    Pick who you prefer
+                  </span>
+                </button>
+              </div>
+
+              {assignMode === 'nearest' ? (
+                <p className="rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-200">
+                  We’ll match the closest free driver to your pickup after you
+                  pay
+                  {availableDrivers[0]?.distanceKm != null
+                    ? ` · nearest now ~${formatDistanceKm(availableDrivers[0].distanceKm)} away`
+                    : ''}
+                  .
+                </p>
+              ) : availableDrivers.length > 0 ? (
                 <div className="max-h-48 space-y-2 overflow-y-auto pr-0.5">
                   {availableDrivers.map((driver) => {
                     const selected = selectedDriver?.id === driver.id;
@@ -611,7 +749,10 @@ export default function HomeDashboard() {
                       <button
                         key={driver.id}
                         type="button"
-                        onClick={() => setSelectedDriverId(driver.id)}
+                        onClick={() => {
+                          setAssignMode('choose');
+                          setSelectedDriverId(driver.id);
+                        }}
                         className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition ${
                           selected
                             ? 'bg-white text-slate-900 shadow-md'
@@ -648,6 +789,9 @@ export default function HomeDashboard() {
                           >
                             {driver.vehiclePlate || 'No plate'} · ★{' '}
                             {driver.rating}
+                            {driver.distanceKm != null
+                              ? ` · ${formatDistanceKm(driver.distanceKm)}`
+                              : ''}
                           </p>
                         </div>
                         <span
@@ -663,11 +807,41 @@ export default function HomeDashboard() {
                 </div>
               ) : (
                 <p className="rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-300">
-                  No drivers available right now. Try scheduling a ride for
+                  No drivers available right now. Try Auto · nearest, schedule
                   later, or check back soon.
                 </p>
               )}
             </div>
+
+            {(fareQuote || quoteLoading) && (
+              <div className="mt-4 rounded-xl bg-white/10 px-3 py-2.5 text-sm text-emerald-50">
+                {quoteLoading && !fareQuote ? (
+                  <p>Estimating fare from distance + fuel…</p>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      Est. fare
+                      {fareQuote?.distanceKm != null
+                        ? ` · ${formatDistanceKm(fareQuote.distanceKm)}`
+                        : ''}
+                    </span>
+                    <span className="text-base font-bold text-white">
+                      {formatMoney(displayFareCents)}
+                    </span>
+                  </div>
+                )}
+                {fareQuote?.breakdown && (
+                  <p className="mt-1 text-[11px] text-emerald-100/80">
+                    Base ₦{fareQuote.breakdown.baseFareNaira} + fuel ₦
+                    {fareQuote.breakdown.fuelCostNaira} + labor ₦
+                    {fareQuote.breakdown.laborNaira}
+                    {fareQuote.fuelPricePerLiter
+                      ? ` · fuel ₦${fareQuote.fuelPricePerLiter}/L`
+                      : ''}
+                  </p>
+                )}
+              </div>
+            )}
 
             {instantError && (
               <ErrorBanner
@@ -685,7 +859,7 @@ export default function HomeDashboard() {
               disabled={
                 instantLoading ||
                 children.length === 0 ||
-                availableDrivers.length === 0
+                (assignMode === 'choose' && availableDrivers.length === 0)
               }
               className="mt-5 w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -693,13 +867,24 @@ export default function HomeDashboard() {
                 ? 'Creating ride…'
                 : children.length === 0
                   ? 'Add a child to book'
-                  : availableDrivers.length === 0
+                  : assignMode === 'choose' && availableDrivers.length === 0
                     ? 'No drivers available'
-                    : selectedDriver
-                      ? activeRides.length > 0
-                        ? `Book another · ${selectedDriver.name} · ${formatMoney(300000)}`
-                        : `Book ${selectedDriver.name} · ${formatMoney(300000)}`
-                      : `Book instant ride · ${formatMoney(300000)}`}
+                    : (() => {
+                        const fareLabel = displayFareCents
+                          ? formatMoney(displayFareCents)
+                          : 'dynamic fare';
+                        if (assignMode === 'nearest') {
+                          return activeRides.length > 0
+                            ? `Book another · nearest · ${fareLabel}`
+                            : `Book nearest · ${fareLabel}`;
+                        }
+                        if (selectedDriver) {
+                          return activeRides.length > 0
+                            ? `Book another · ${selectedDriver.name} · ${fareLabel}`
+                            : `Book ${selectedDriver.name} · ${fareLabel}`;
+                        }
+                        return `Book instant ride · ${fareLabel}`;
+                      })()}
             </button>
             <Link
               to="/select-children"
@@ -753,7 +938,9 @@ export default function HomeDashboard() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
               {drivers.slice(0, 6).map((driver) => {
                 const selected =
-                  selectedDriver?.id === driver.id && driver.available;
+                  assignMode === 'choose' &&
+                  selectedDriver?.id === driver.id &&
+                  driver.available;
                 return (
                   <button
                     key={driver.id}
@@ -761,6 +948,7 @@ export default function HomeDashboard() {
                     disabled={!driver.available}
                     onClick={() => {
                       if (driver.available) {
+                        setAssignMode('choose');
                         setSelectedDriverId(driver.id);
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                       }

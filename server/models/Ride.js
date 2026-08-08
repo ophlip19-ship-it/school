@@ -75,6 +75,31 @@ const rideSchema = new mongoose.Schema(
       index: true,
     },
     fareCents: { type: Number, default: 250000 },
+    /** Billed trip distance used for dynamic pricing */
+    distanceKm: { type: Number, default: null },
+    /** Local pump price (NGN/L) at booking time */
+    fuelPricePerLiter: { type: Number, default: null },
+    /** Snapshot of fare components for receipts / UI */
+    fareBreakdown: {
+      distanceKm: { type: Number, default: null },
+      fuelPricePerLiter: { type: Number, default: null },
+      fuelLiters: { type: Number, default: null },
+      fuelCostNaira: { type: Number, default: null },
+      laborNaira: { type: Number, default: null },
+      baseFareNaira: { type: Number, default: null },
+      totalNaira: { type: Number, default: null },
+    },
+    /**
+     * How the driver was chosen:
+     *  - choose  → parent picked a specific driver (requested after pay)
+     *  - nearest → system picks nearest free driver by map location (assigned after pay)
+     *  - pool    → any available driver can accept (open after pay)
+     */
+    assignMode: {
+      type: String,
+      enum: ['choose', 'nearest', 'pool'],
+      default: 'pool',
+    },
     currency: { type: String, default: 'ngn' },
     handoverPin: { type: String, required: true },
     paymentStatus: { type: String, default: 'unpaid' },

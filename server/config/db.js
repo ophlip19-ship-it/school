@@ -62,6 +62,8 @@ async function seedIfEmpty() {
 
   const passwordHash = await bcrypt.hash('password123', 10);
 
+  const now = new Date();
+  // Seed drivers near Lagos anchors so nearest-driver assignment works in demo
   const [, , , , parent] = await User.create([
     {
       email: 'driver@schoolrun.app',
@@ -71,6 +73,12 @@ async function seedIfEmpty() {
       phone: '+2348000000001',
       vehiclePlate: '56A-902-LGS',
       verified: true,
+      lastLocation: {
+        lng: 3.4701,
+        lat: 6.4492,
+        heading: 90,
+        updatedAt: now,
+      },
     },
     {
       email: 'driver2@schoolrun.app',
@@ -80,6 +88,12 @@ async function seedIfEmpty() {
       phone: '+2348000000004',
       vehiclePlate: 'ABC-441-LG',
       verified: true,
+      lastLocation: {
+        lng: 3.425,
+        lat: 6.431,
+        heading: 180,
+        updatedAt: now,
+      },
     },
     {
       email: 'driver3@schoolrun.app',
@@ -89,6 +103,12 @@ async function seedIfEmpty() {
       phone: '+2348000000005',
       vehiclePlate: 'KJA-228-AB',
       verified: true,
+      lastLocation: {
+        lng: 3.38,
+        lat: 6.455,
+        heading: 45,
+        updatedAt: now,
+      },
     },
     {
       email: 'admin@schoolrun.app',

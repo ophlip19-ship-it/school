@@ -2,13 +2,99 @@ import { Router } from 'express';
 import Stripe from 'stripe';
 import Ride from '../models/Ride.js';
 import Payment from '../models/Payment.js';
+import User from '../models/User.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { haversineKm, pickNearestDriver } from '../utils/pricing.js';
 
 const router = Router();
 
 const stripeKey = process.env.STRIPE_SECRET_KEY || '';
 const stripe = stripeKey ? new Stripe(stripeKey) : null;
 const demoPayments = process.env.DEMO_PAYMENTS !== 'false';
+
+/** Free (no assigned/in-transit ride) drivers, optionally ranked to a point. */
+async function listFreeDriversNear(targetCoords = null) {
+  const drivers = await User.find({
+    role: 'driver',
+    suspended: { $ne: true },
+  }).lean();
+
+  const free = [];
+  for (const d of drivers) {
+    const activeCount = await Ride.countDocuments({
+      driverId: d._id,
+      status: { $in: ['assigned', 'in_transit'] },
+    });
+    if (activeCount === 0) free.push(d);
+  }
+
+  if (!targetCoords || free.length === 0) return free;
+
+  return free
+    .map((d) => {
+      const km = haversineKm(d.lastLocation, targetCoords);
+      return { ...d, _distKm: km == null ? Infinity : km };
+    })
+    .sort((a, b) => a._distKm - b._distKm);
+}
+
+/**
+ * After payment succeeds, resolve post-pay status from assignMode:
+ *  - choose  → keep preferred driver, status requested
+ *  - nearest → re-pick nearest free driver (fresh GPS), status requested
+ *  - pool    → clear driver, status open for any driver
+ */
+async function resolvePostPaymentAssignment(ride) {
+  const mode = String(ride.assignMode || '').toLowerCase();
+  const pickup = ride.pickupCoords;
+
+  if (mode === 'pool') {
+    return { driverId: null, status: 'open', assignMode: 'pool' };
+  }
+
+  if (mode === 'nearest') {
+    const free = await listFreeDriversNear(pickup);
+    // Prefer a free driver who still matches provisional pick if still free
+    const provisionalId = ride.driverId?.toString?.() || ride.driverId;
+    const stillFree = provisionalId
+      ? free.find((d) => d._id.toString() === provisionalId)
+      : null;
+    const picked = stillFree
+      ? { driver: stillFree }
+      : pickNearestDriver(free, pickup);
+
+    if (picked?.driver) {
+      return {
+        driverId: picked.driver._id,
+        status: 'requested',
+        assignMode: 'nearest',
+      };
+    }
+    // Nobody free with GPS → fall open so any driver can grab it
+    return { driverId: null, status: 'open', assignMode: 'pool' };
+  }
+
+  // choose (or legacy rides with a preferred driverId)
+  if (ride.driverId) {
+    // Ensure preferred driver is still active / not suspended
+    const driver = await User.findOne({
+      _id: ride.driverId,
+      role: 'driver',
+      suspended: { $ne: true },
+    }).select('_id');
+    if (driver) {
+      return {
+        driverId: driver._id,
+        status: 'requested',
+        assignMode: 'choose',
+      };
+    }
+    // Preferred driver gone → open pool
+    return { driverId: null, status: 'open', assignMode: 'pool' };
+  }
+
+  return { driverId: null, status: 'open', assignMode: mode || 'pool' };
+}
 
 async function markRidePaid(rideId, userId, amountCents, provider, providerRef) {
   const payment = await Payment.create({
@@ -21,14 +107,18 @@ async function markRidePaid(rideId, userId, amountCents, provider, providerRef) 
     providerRef: providerRef || null,
   });
 
-  // Parent-picked driver → requested (driver must accept/reject);
-  // no preferred driver → open pool for any driver
-  const existing = await Ride.findById(rideId).select('driverId');
-  const nextStatus = existing?.driverId ? 'requested' : 'open';
+  const existing = await Ride.findById(rideId).select(
+    'driverId assignMode pickupCoords',
+  );
+  const assignment = existing
+    ? await resolvePostPaymentAssignment(existing)
+    : { driverId: null, status: 'open', assignMode: 'pool' };
 
   await Ride.findByIdAndUpdate(rideId, {
     paymentStatus: 'paid',
-    status: nextStatus,
+    status: assignment.status,
+    driverId: assignment.driverId,
+    assignMode: assignment.assignMode,
     ...(provider === 'stripe' && providerRef
       ? { stripePaymentIntentId: providerRef }
       : {}),

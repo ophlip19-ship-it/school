@@ -60,7 +60,20 @@ export const childrenApi = {
 };
 
 export const driversApi = {
-  active: () => api("/drivers/active"),
+  /** Optional near: { lng, lat } ranks free drivers by distance to pickup */
+  active: (near) => {
+    if (near?.lng != null && near?.lat != null) {
+      const q = new URLSearchParams({
+        lng: String(near.lng),
+        lat: String(near.lat),
+      });
+      return api(`/drivers/active?${q}`);
+    }
+    return api("/drivers/active");
+  },
+  /** Driver GPS heartbeat for nearest-driver matching */
+  updateLocation: (body) =>
+    api("/drivers/location", { method: "POST", body }),
 };
 
 export const ridesApi = {
@@ -69,6 +82,8 @@ export const ridesApi = {
   active: () => api("/rides/active"),
   get: (id) => api(`/rides/${id}`),
   create: (body) => api("/rides", { method: "POST", body }),
+  /** Preview fare from coords / distance (auth parent|admin) */
+  quote: (body) => api("/rides/quote", { method: "POST", body }),
   accept: (id) => api(`/rides/${id}/accept`, { method: "POST", body: {} }),
   reject: (id) => api(`/rides/${id}/reject`, { method: "POST", body: {} }),
   /** Parent: cancel before a driver accepts (pending_payment | open | requested) */

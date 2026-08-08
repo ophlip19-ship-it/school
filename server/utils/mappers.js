@@ -76,6 +76,21 @@ export function mapRide(ride, extras = {}) {
     tripType: r.tripType,
     status: r.status,
     fareCents: r.fareCents,
+    distanceKm: r.distanceKm ?? r.fareBreakdown?.distanceKm ?? null,
+    fuelPricePerLiter:
+      r.fuelPricePerLiter ?? r.fareBreakdown?.fuelPricePerLiter ?? null,
+    fareBreakdown: r.fareBreakdown
+      ? {
+          distanceKm: r.fareBreakdown.distanceKm ?? null,
+          fuelPricePerLiter: r.fareBreakdown.fuelPricePerLiter ?? null,
+          fuelLiters: r.fareBreakdown.fuelLiters ?? null,
+          fuelCostNaira: r.fareBreakdown.fuelCostNaira ?? null,
+          laborNaira: r.fareBreakdown.laborNaira ?? null,
+          baseFareNaira: r.fareBreakdown.baseFareNaira ?? null,
+          totalNaira: r.fareBreakdown.totalNaira ?? null,
+        }
+      : null,
+    assignMode: r.assignMode || (r.driverId ? 'choose' : 'pool'),
     currency: r.currency,
     handoverPin: r.handoverPin,
     paymentStatus: r.paymentStatus,
