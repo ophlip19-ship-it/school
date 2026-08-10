@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Star, Shield, Car, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { ridesApi, driversApi, formatMoney } from '../lib/api';
+import { ridesApi, driversApi } from '../lib/api';
 import { getBookingDraft, clearBookingDraft, setBookingDraft } from '../lib/booking';
 import { captureParentLocationForBooking } from '../lib/geo';
-
-const FARE_CENTS = 250000; // ₦2,500
 
 export default function VehicleReview() {
   const { user } = useAuth();
@@ -75,7 +73,6 @@ export default function VehicleReview() {
         date: draft.date,
         time: draft.time,
         tripType: draft.tripType || 'pickup',
-        fareCents: FARE_CENTS,
       });
       clearBookingDraft();
       navigate(`/payment?rideId=${ride.id}`);
@@ -216,12 +213,6 @@ export default function VehicleReview() {
             <span className="text-slate-500">When</span>
             <span className="font-medium text-slate-900">
               {draft.date || '—'} · {draft.time || '—'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-            <span className="text-slate-500">Fare</span>
-            <span className="text-lg font-bold text-emerald-700">
-              {formatMoney(FARE_CENTS)}
             </span>
           </div>
         </div>

@@ -27,7 +27,6 @@ import {
   captureParentLocationForBooking,
   formatDistanceKm,
   DEFAULT_HOME,
-  DEFAULT_SCHOOL,
 } from '../lib/geo';
 import { quoteTripFare } from '../lib/pricing';
 import AddressSearchInput from '../components/AddressSearchInput';
@@ -269,8 +268,6 @@ export default function HomeDashboard() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState('');
-  const [fareQuote, setFareQuote] = useState(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
 
   const children = user?.children || [];
 
@@ -307,34 +304,20 @@ export default function HomeDashboard() {
   const selectedChild =
     children.find((c) => c.id === selectedChildId) || children[0] || null;
 
-  // Preview fare whenever pickup / dropoff choices change
+  // Rank free drivers by distance to pickup whenever locations change
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       if (dropoffMode === 'custom' && !customDropoffPlace) {
-        setFareQuote(null);
         return;
       }
-      setQuoteLoading(true);
       try {
         const from = await resolvePickup({
           mode: pickupMode === 'current' ? 'current' : 'home',
           homeAddress: user?.homeAddress || DEFAULT_HOME.label,
           homeCoords: user?.homeCoords,
         });
-        const to = await resolveDestination({
-          mode: dropoffMode === 'custom' ? 'custom' : 'school',
-          schoolName: selectedChild?.school || school,
-          customLabel: customDropoff.trim(),
-          customCoords: customDropoffPlace,
-        });
         if (cancelled) return;
-        const quote = await quoteTripFare(
-          { lng: from.lng, lat: from.lat },
-          { lng: to.lng, lat: to.lat },
-        );
-        if (!cancelled) setFareQuote(quote);
-        // Rank free drivers by distance to pickup
         driversApi
           .active({ lng: from.lng, lat: from.lat })
           .then(({ drivers: list }) => {
@@ -351,16 +334,7 @@ export default function HomeDashboard() {
             if (!cancelled) setDrivers([]);
           });
       } catch {
-        if (!cancelled) {
-          // Still show a baseline quote from defaults
-          const quote = await quoteTripFare(
-            user?.homeCoords || DEFAULT_HOME,
-            DEFAULT_SCHOOL,
-          );
-          setFareQuote(quote);
-        }
-      } finally {
-        if (!cancelled) setQuoteLoading(false);
+        if (!cancelled) setDrivers([]);
       }
     };
     run();
@@ -370,10 +344,7 @@ export default function HomeDashboard() {
   }, [
     pickupMode,
     dropoffMode,
-    customDropoff,
     customDropoffPlace,
-    selectedChild?.school,
-    school,
     user?.homeAddress,
     user?.homeCoords,
   ]);
@@ -385,7 +356,6 @@ export default function HomeDashboard() {
     availableDrivers.find((d) => d.id === selectedDriverId) ||
     availableDrivers[0] ||
     null;
-  const displayFareCents = fareQuote?.fareCents ?? null;
 
   const childHasActiveRide = (childId) =>
     activeRides.some(
@@ -813,36 +783,6 @@ export default function HomeDashboard() {
               )}
             </div>
 
-            {(fareQuote || quoteLoading) && (
-              <div className="mt-4 rounded-xl bg-white/10 px-3 py-2.5 text-sm text-emerald-50">
-                {quoteLoading && !fareQuote ? (
-                  <p>Estimating fare from distance + fuel…</p>
-                ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      Est. fare
-                      {fareQuote?.distanceKm != null
-                        ? ` · ${formatDistanceKm(fareQuote.distanceKm)}`
-                        : ''}
-                    </span>
-                    <span className="text-base font-bold text-white">
-                      {formatMoney(displayFareCents)}
-                    </span>
-                  </div>
-                )}
-                {fareQuote?.breakdown && (
-                  <p className="mt-1 text-[11px] text-emerald-100/80">
-                    Base ₦{fareQuote.breakdown.baseFareNaira} + fuel ₦
-                    {fareQuote.breakdown.fuelCostNaira} + labor ₦
-                    {fareQuote.breakdown.laborNaira}
-                    {fareQuote.fuelPricePerLiter
-                      ? ` · fuel ₦${fareQuote.fuelPricePerLiter}/L`
-                      : ''}
-                  </p>
-                )}
-              </div>
-            )}
-
             {instantError && (
               <ErrorBanner
                 variant="dark"
@@ -870,20 +810,17 @@ export default function HomeDashboard() {
                   : assignMode === 'choose' && availableDrivers.length === 0
                     ? 'No drivers available'
                     : (() => {
-                        const fareLabel = displayFareCents
-                          ? formatMoney(displayFareCents)
-                          : 'dynamic fare';
                         if (assignMode === 'nearest') {
                           return activeRides.length > 0
-                            ? `Book another · nearest · ${fareLabel}`
-                            : `Book nearest · ${fareLabel}`;
+                            ? 'Book another · nearest'
+                            : 'Book nearest driver';
                         }
                         if (selectedDriver) {
                           return activeRides.length > 0
-                            ? `Book another · ${selectedDriver.name} · ${fareLabel}`
-                            : `Book ${selectedDriver.name} · ${fareLabel}`;
+                            ? `Book another · ${selectedDriver.name}`
+                            : `Book ${selectedDriver.name}`;
                         }
-                        return `Book instant ride · ${fareLabel}`;
+                        return 'Book instant ride';
                       })()}
             </button>
             <Link
