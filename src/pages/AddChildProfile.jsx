@@ -60,7 +60,7 @@ export default function AddChildProfile() {
 
   const [childName, setChildName] = useState('');
   const [grade, setGrade] = useState('Grade 5');
-  const [school, setSchool] = useState('Greenfield School');
+  const [school, setSchool] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,7 @@ export default function AddChildProfile() {
       if (target) {
         setChildName(target.name || '');
         setGrade(target.grade || 'Grade 5');
-        setSchool(target.school || 'Greenfield School');
+        setSchool(target.school || '');
         setPhotoUrl(target.photoUrl || '');
       }
       setSavedChildId(null);
@@ -82,11 +82,7 @@ export default function AddChildProfile() {
     // New child — blank form (do not prefill from first child)
     setChildName('');
     setGrade('Grade 5');
-    const defaultSchool =
-      user?.school ||
-      user?.children?.[0]?.school ||
-      'Greenfield School';
-    setSchool(defaultSchool);
+    setSchool(user?.school || user?.children?.[0]?.school || '');
     setPhotoUrl('');
     setSavedChildId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-init when switching child id / new form
@@ -114,11 +110,15 @@ export default function AddChildProfile() {
       setError('Child name is required');
       return;
     }
+    if (!school.trim()) {
+      setError('School is required');
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
         name: childName.trim(),
-        school: school.trim() || 'Greenfield School',
+        school: school.trim(),
         grade,
         photoUrl: photoUrl || '',
       };
@@ -279,6 +279,7 @@ export default function AddChildProfile() {
           <input
             value={school}
             onChange={(e) => setSchool(e.target.value)}
+            placeholder="e.g. Grange School, Ikeja"
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
           />
         </div>

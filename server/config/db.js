@@ -125,6 +125,8 @@ async function seedIfEmpty() {
       name: 'Aisha Bello',
       phone: '+2348000000003',
       verified: true,
+      homeAddress: 'Home · 12 Admiralty Way, Lekki',
+      homeCoords: { lng: 3.4734, lat: 6.4474 },
     },
   ]);
 

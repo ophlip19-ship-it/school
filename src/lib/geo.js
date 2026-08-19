@@ -307,6 +307,22 @@ export async function forwardGeocode(query, token = mapboxToken()) {
   }
 }
 
+export function hasLngLat(point) {
+  return (
+    point != null &&
+    Number.isFinite(Number(point.lng)) &&
+    Number.isFinite(Number(point.lat))
+  );
+}
+
+/** Map camera fallback (Lagos) — not a user address. */
+export function mapCenterFromUser(user) {
+  if (hasLngLat(user?.homeCoords)) {
+    return { lng: user.homeCoords.lng, lat: user.homeCoords.lat };
+  }
+  return { lng: DEFAULT_HOME.lng, lat: DEFAULT_HOME.lat };
+}
+
 /**
  * Resolve pickup: home | current | custom text
  */
@@ -318,15 +334,29 @@ export async function resolvePickup({
   customCoords,
 }) {
   if (mode === 'home') {
-    const label = homeAddress || DEFAULT_HOME.label;
-    if (homeCoords?.lng != null && homeCoords?.lat != null) {
-      return { label, lng: homeCoords.lng, lat: homeCoords.lat };
+    const label = (homeAddress || '').trim();
+    if (!label && !hasLngLat(homeCoords)) {
+      throw new Error(
+        'Add your home address first, or pick current location / search the map.',
+      );
+    }
+    if (hasLngLat(homeCoords)) {
+      return {
+        label: label || 'Home',
+        lng: Number(homeCoords.lng),
+        lat: Number(homeCoords.lat),
+      };
     }
     const geo = await forwardGeocode(label);
+    if (!geo) {
+      throw new Error(
+        'Could not find that home address on the map. Search again or tap the map.',
+      );
+    }
     return {
-      label,
-      lng: geo?.lng ?? DEFAULT_HOME.lng,
-      lat: geo?.lat ?? DEFAULT_HOME.lat,
+      label: geo.label || label,
+      lng: geo.lng,
+      lat: geo.lat,
     };
   }
 
@@ -341,18 +371,21 @@ export async function resolvePickup({
   }
 
   // custom
-  if (customCoords?.lng != null && customCoords?.lat != null) {
+  if (hasLngLat(customCoords)) {
     return {
       label: customLabel || 'Custom pickup',
-      lng: customCoords.lng,
-      lat: customCoords.lat,
+      lng: Number(customCoords.lng),
+      lat: Number(customCoords.lat),
     };
   }
-  const geo = await forwardGeocode(customLabel || DEFAULT_HOME.label);
+  const geo = await forwardGeocode(customLabel);
+  if (!geo) {
+    throw new Error('Search or tap the map to set a pickup location.');
+  }
   return {
-    label: customLabel || geo?.label || DEFAULT_HOME.label,
-    lng: geo?.lng ?? DEFAULT_HOME.lng,
-    lat: geo?.lat ?? DEFAULT_HOME.lat,
+    label: customLabel || geo.label,
+    lng: geo.lng,
+    lat: geo.lat,
   };
 }
 
@@ -378,10 +411,14 @@ export async function resolveDestination({
   }
 
   if (mode === 'school') {
-    const label = schoolName
-      ? `${schoolName} · main gate`
-      : DEFAULT_SCHOOL.label;
-    const local = findSchoolInDatabase?.(schoolName || 'Greenfield');
+    const name = (schoolName || '').trim();
+    if (!name) {
+      throw new Error(
+        'This child has no school yet. Add a school on the child profile, or search a destination.',
+      );
+    }
+    const label = `${name} · main gate`;
+    const local = findSchoolInDatabase?.(name);
     if (local) {
       return {
         label: local.label.includes('main gate')
@@ -391,19 +428,24 @@ export async function resolveDestination({
         lat: local.lat,
       };
     }
-    const geo = await forwardGeocode(schoolName || DEFAULT_SCHOOL.label);
+    const geo = await forwardGeocode(name);
+    if (!geo) {
+      throw new Error(
+        'Could not find that school on the map. Search a destination instead.',
+      );
+    }
     return {
-      label,
-      lng: geo?.lng ?? DEFAULT_SCHOOL.lng,
-      lat: geo?.lat ?? DEFAULT_SCHOOL.lat,
+      label: geo.label?.includes('main gate') ? geo.label : label,
+      lng: geo.lng,
+      lat: geo.lat,
     };
   }
 
-  if (customCoords?.lng != null && customCoords?.lat != null) {
+  if (hasLngLat(customCoords)) {
     return {
       label: customLabel || 'Custom destination',
-      lng: customCoords.lng,
-      lat: customCoords.lat,
+      lng: Number(customCoords.lng),
+      lat: Number(customCoords.lat),
     };
   }
 
@@ -416,11 +458,14 @@ export async function resolveDestination({
     };
   }
 
-  const geo = await forwardGeocode(customLabel || DEFAULT_SCHOOL.label);
+  const geo = await forwardGeocode(customLabel);
+  if (!geo) {
+    throw new Error('Search or tap the map to set a destination.');
+  }
   return {
-    label: customLabel || geo?.label || DEFAULT_SCHOOL.label,
-    lng: geo?.lng ?? DEFAULT_SCHOOL.lng,
-    lat: geo?.lat ?? DEFAULT_SCHOOL.lat,
+    label: customLabel || geo.label,
+    lng: geo.lng,
+    lat: geo.lat,
   };
 }
 

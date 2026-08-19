@@ -40,18 +40,21 @@ router.post('/', async (req, res) => {
   try {
     const {
       name,
-      school = 'Greenfield School',
+      school = '',
       grade = 'Grade 5',
       photoUrl = '',
     } = req.body || {};
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Child name is required' });
     }
+    if (!String(school).trim()) {
+      return res.status(400).json({ error: 'School is required' });
+    }
 
     const child = await Child.create({
       parentId: req.user.id,
       name: name.trim(),
-      school,
+      school: String(school).trim(),
       grade,
       photoUrl: normalizePhotoUrl(photoUrl) || '',
     });

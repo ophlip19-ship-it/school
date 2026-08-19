@@ -44,9 +44,9 @@ export const AuthProvider = ({ children }) => {
         name: userData.parentName || userData.name || userData.driverName,
         role: userData.role || 'parent',
         phone: userData.phone || '',
-        childName: userData.childName,
-        school: userData.school,
         vehiclePlate: userData.vehiclePlate,
+        homeAddress: userData.homeAddress,
+        homeCoords: userData.homeCoords,
       });
       applySession(token, created);
       return created;

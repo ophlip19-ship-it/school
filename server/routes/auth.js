@@ -49,9 +49,9 @@ router.post('/register', async (req, res) => {
       name,
       role = 'parent',
       phone = '',
-      childName,
-      school = 'Greenfield School',
       vehiclePlate = '',
+      homeAddress = '',
+      homeCoords = null,
     } = req.body || {};
 
     if (!email || !password || !name) {
@@ -75,6 +75,14 @@ router.post('/register', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+
+    const parsedHomeCoords =
+      homeCoords &&
+      Number.isFinite(Number(homeCoords.lng)) &&
+      Number.isFinite(Number(homeCoords.lat))
+        ? { lng: Number(homeCoords.lng), lat: Number(homeCoords.lat) }
+        : { lng: null, lat: null };
+
     const userDoc = await User.create({
       email: normalizedEmail,
       passwordHash,
@@ -85,29 +93,15 @@ router.post('/register', async (req, res) => {
         role === 'driver'
           ? String(vehiclePlate || '56A-902-LGS').trim()
           : '',
+      homeAddress:
+        role === 'parent' ? String(homeAddress || '').trim() : '',
+      homeCoords: role === 'parent' ? parsedHomeCoords : { lng: null, lat: null },
       verified: role !== 'parent',
     });
 
-    let child = null;
-    if (role === 'parent') {
-      const cName = String(childName || 'Alex').trim();
-      const childDoc = await Child.create({
-        parentId: userDoc._id,
-        name: cName,
-        school,
-        grade: 'Grade 5',
-      });
-      child = {
-        id: childDoc._id.toString(),
-        name: childDoc.name,
-        school: childDoc.school,
-        grade: childDoc.grade,
-      };
-    }
-
     const user = await enrichUser(userDoc.toPublic());
     const token = signToken(userDoc);
-    return res.status(201).json({ token, user, child });
+    return res.status(201).json({ token, user });
   } catch (err) {
     console.error('[auth/register]', err);
     return res.status(500).json({ error: 'Registration failed' });

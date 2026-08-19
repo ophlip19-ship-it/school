@@ -9,7 +9,7 @@ const childSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true },
-    school: { type: String, default: 'Greenfield School' },
+    school: { type: String, default: '' },
     grade: { type: String, default: 'Grade 5' },
     /** Base64 data URL or remote image URL */
     photoUrl: { type: String, default: '' },

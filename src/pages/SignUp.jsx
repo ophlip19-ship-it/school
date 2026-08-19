@@ -1,12 +1,30 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AddressSearchInput from '../components/AddressSearchInput';
+import { forwardGeocode } from '../lib/geo';
 
 const ROLES = [
   { id: 'parent', label: 'Parent', hint: 'Book & track rides' },
   { id: 'driver', label: 'Driver', hint: 'Accept school trips' },
   { id: 'admin', label: 'Admin', hint: 'Manage the network' },
 ];
+
+function EyeIcon({ open }) {
+  return open ? (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+      <path d="M3 3l18 18" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.6 10.6A2 2 0 0 0 13.4 13.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.1 5.5A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17.1 17.1 0 0 1-4.4 5.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.2 6.2A16.8 16.8 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 5.3-1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -24,31 +42,58 @@ export default function SignUp() {
     email: '',
     password: '',
     phone: '',
-    childName: '',
-    school: 'Greenfield School',
-    vehiclePlate: '56A-902-LGS',
+    homeAddress: '',
+    vehiclePlate: '',
   });
+  const [homeCoords, setHomeCoords] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const onChange = (e) => setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
-    try {
-      if (mode === 'login') {
+
+    if (mode === 'login') {
+      setLoading(true);
+      try {
         const user = await login({ email: form.email, password: form.password });
         navigate(
           user.role === 'driver' ? '/driver' : user.role === 'admin' ? '/admin' : '/dashboard',
         );
-        return;
+      } catch (err) {
+        setError(err.message || 'Something went wrong');
+      } finally {
+        setLoading(false);
       }
+      return;
+    }
 
-      if (!form.name.trim() || !form.email.trim() || !form.password) {
-        setError('Name, email, and password are required.');
-        return;
+    if (!form.name.trim() || !form.email.trim() || !form.password) {
+      setError('Name, email, and password are required.');
+      return;
+    }
+
+    if (role === 'parent' && !form.homeAddress.trim()) {
+      setError('Home address is required. Search and pick your address from the list.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let coords = homeCoords;
+      let resolvedHome = form.homeAddress.trim();
+      if (role === 'parent' && !coords) {
+        const geo = await forwardGeocode(resolvedHome);
+        if (!geo) {
+          setError('Could not place that home address on the map. Pick a suggestion from the list.');
+          setLoading(false);
+          return;
+        }
+        coords = { lng: geo.lng, lat: geo.lat };
+        if (geo.label) resolvedHome = geo.label;
       }
 
       const user = await registerUser({
@@ -57,9 +102,9 @@ export default function SignUp() {
         email: form.email.trim(),
         password: form.password,
         phone: form.phone.trim(),
-        childName: form.childName.trim() || 'Alex',
-        school: form.school.trim() || 'Greenfield School',
         vehiclePlate: form.vehiclePlate.trim(),
+        homeAddress: role === 'parent' ? resolvedHome : '',
+        homeCoords: role === 'parent' ? coords : null,
       });
 
       if (user.role === 'parent') navigate('/verify');
@@ -70,8 +115,6 @@ export default function SignUp() {
     } finally {
       setLoading(false);
     }
-
-     
   };
 
   return (
@@ -131,14 +174,24 @@ export default function SignUp() {
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
-          <input
-            name="password"
-            type="password"
-            value={form.password}
-            onChange={onChange}
-            placeholder="Min 6 characters"
-            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
-          />
+          <div className="relative">
+            <input
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              value={form.password}
+              onChange={onChange}
+              placeholder="Min 6 characters"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 pr-12 outline-none ring-emerald-600/30 focus:ring-2"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute inset-y-0 right-3 flex items-center justify-center text-slate-500 transition hover:text-slate-700"
+            >
+              <EyeIcon open={showPassword} />
+            </button>
+          </div>
         </div>
 
         {mode === 'register' && (
@@ -154,28 +207,32 @@ export default function SignUp() {
               />
             </div>
             {role === 'parent' && (
-              <>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Child&apos;s name
-                  </label>
-                  <input
-                    name="childName"
-                    value={form.childName}
-                    onChange={onChange}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">School</label>
-                  <input
-                    name="school"
-                    value={form.school}
-                    onChange={onChange}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
-                  />
-                </div>
-              </>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Home address
+                </label>
+                <AddressSearchInput
+                  value={form.homeAddress}
+                  onChange={(v) => {
+                    setForm((prev) => ({ ...prev, homeAddress: v }));
+                    setHomeCoords(null);
+                  }}
+                  onSelect={(place) => {
+                    setForm((prev) => ({ ...prev, homeAddress: place.label }));
+                    setHomeCoords({ lng: place.lng, lat: place.lat });
+                  }}
+                  placeholder="Search your home address…"
+                />
+                {homeCoords ? (
+                  <p className="mt-1.5 text-xs text-emerald-700">
+                    Saved on the map · pickup pin during booking
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Pick a suggestion so drivers get a live map pin. 
+                  </p>
+                )}
+              </div>
             )}
             {role === 'driver' && (
               <div>

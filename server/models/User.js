@@ -18,10 +18,10 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, default: '' },
     vehiclePlate: { type: String, default: '' },
-    homeAddress: { type: String, default: 'Home · 12 Admiralty Way, Lekki' },
+    homeAddress: { type: String, default: '' },
     homeCoords: {
-      lng: { type: Number, default: 3.4734 },
-      lat: { type: Number, default: 6.4474 },
+      lng: { type: Number, default: null },
+      lat: { type: Number, default: null },
     },
     // Latest shared GPS for live maps (drivers & parents)
     lastLocation: {
