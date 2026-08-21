@@ -389,13 +389,30 @@ export async function resolvePickup({
   };
 }
 
+/** Display label for a child's school (address preferred, then name). */
+export function schoolLabelFromChild(child) {
+  if (!child) return '';
+  return String(child.schoolAddress || child.school || '').trim();
+}
+
+/** Saved school pin from a child profile, or null if unmapped. */
+export function schoolCoordsFromChild(child) {
+  if (!hasLngLat(child?.schoolCoords)) return null;
+  return {
+    lng: Number(child.schoolCoords.lng),
+    lat: Number(child.schoolCoords.lat),
+  };
+}
+
 /**
  * Resolve destination: school | custom
- * Prefer local address database, then Mapbox, then defaults.
+ * Prefer the child profile pin, then local address database, then Mapbox.
  */
 export async function resolveDestination({
   mode,
   schoolName,
+  schoolAddress,
+  schoolCoords,
   customLabel,
   customCoords,
 }) {
@@ -411,19 +428,24 @@ export async function resolveDestination({
   }
 
   if (mode === 'school') {
-    const name = (schoolName || '').trim();
+    if (hasLngLat(schoolCoords)) {
+      const label = (schoolAddress || schoolName || 'School').trim();
+      return {
+        label,
+        lng: Number(schoolCoords.lng),
+        lat: Number(schoolCoords.lat),
+      };
+    }
+    const name = (schoolAddress || schoolName || '').trim();
     if (!name) {
       throw new Error(
         'This child has no school yet. Add a school on the child profile, or search a destination.',
       );
     }
-    const label = `${name} · main gate`;
     const local = findSchoolInDatabase?.(name);
     if (local) {
       return {
-        label: local.label.includes('main gate')
-          ? local.label
-          : `${local.label} · main gate`,
+        label: local.label,
         lng: local.lng,
         lat: local.lat,
       };
@@ -435,7 +457,7 @@ export async function resolveDestination({
       );
     }
     return {
-      label: geo.label?.includes('main gate') ? geo.label : label,
+      label: geo.label || name,
       lng: geo.lng,
       lat: geo.lat,
     };

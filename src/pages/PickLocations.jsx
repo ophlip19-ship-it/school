@@ -13,6 +13,8 @@ import {
   resolvePickup,
   reverseGeocode,
   captureParentLocationForBooking,
+  schoolLabelFromChild,
+  schoolCoordsFromChild,
 } from '../lib/geo';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
 import MapBottomDrawer from '../components/MapBottomDrawer';
@@ -22,7 +24,17 @@ export default function PickLocations() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const draft = getBookingDraft();
-  const school = draft.school || user?.school || user?.children?.[0]?.school || 'Greenfield School';
+  const selectedChild =
+    (user?.children || []).find((c) => c.id === draft.childId) ||
+    user?.children?.[0] ||
+    null;
+  const school =
+    draft.schoolAddress ||
+    draft.school ||
+    schoolLabelFromChild(selectedChild) ||
+    '';
+  const schoolCoords =
+    draft.schoolCoords || schoolCoordsFromChild(selectedChild) || null;
   const homeAddress = user?.homeAddress || 'Home · 12 Admiralty Way, Lekki';
 
   const mapContainer = useRef(null);
@@ -241,6 +253,8 @@ export default function PickLocations() {
         const to = await resolveDestination({
           mode: 'school',
           schoolName: school,
+          schoolAddress: school,
+          schoolCoords,
         });
         if (!cancelled) setDropoffPlace(to);
       }
@@ -249,7 +263,7 @@ export default function PickLocations() {
     return () => {
       cancelled = true;
     };
-  }, [dropoffMode, mapReady, school]);
+  }, [dropoffMode, mapReady, school, schoolCoords]);
 
   // Sync markers + fit
   useEffect(() => {
@@ -284,7 +298,9 @@ export default function PickLocations() {
         to = await resolveDestination({
           mode: dropoffMode === 'custom' ? 'custom' : 'school',
           schoolName: school,
-          customLabel: customDropoff || `${school} · main gate`,
+          schoolAddress: school,
+          schoolCoords,
+          customLabel: customDropoff || school || 'School',
           customCoords: dropoffPlace,
         });
       }
@@ -302,6 +318,8 @@ export default function PickLocations() {
         customPickup: customPickup || from.label,
         customDropoff: customDropoff || to.label,
         school,
+        schoolAddress: school,
+        schoolCoords,
         parentLocation: parentLocation || null,
       });
       navigate('/schedule');
@@ -511,7 +529,9 @@ export default function PickLocations() {
             >
               <School size={18} className="text-blue-600" />
               <span className="text-sm font-semibold text-slate-900">School</span>
-              <span className="line-clamp-2 text-[11px] text-slate-500">{school}</span>
+              <span className="line-clamp-2 text-[11px] text-slate-500">
+                {school || 'Add a school on the child profile'}
+              </span>
             </button>
             <button
               type="button"

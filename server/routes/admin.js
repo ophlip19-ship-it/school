@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
-import Child from '../models/Child.js';
+import Child, { mapChildPublic } from '../models/Child.js';
 import Ride from '../models/Ride.js';
 import Payment from '../models/Payment.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -39,12 +39,7 @@ async function rideStatsForUser(userId, role) {
 }
 
 function mapChild(c) {
-  return {
-    id: c._id.toString(),
-    name: c.name,
-    school: c.school,
-    grade: c.grade,
-  };
+  return mapChildPublic(c);
 }
 
 function mapRideSummary(r) {

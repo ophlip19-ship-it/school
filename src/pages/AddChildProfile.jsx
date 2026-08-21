@@ -3,6 +3,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Camera, ImagePlus, X, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { childrenApi } from '../lib/api';
+import AddressSearchInput from '../components/AddressSearchInput';
+import LocationPinMap from '../components/LocationPinMap';
+import {
+  findSchoolInDatabase,
+} from '../lib/addressDatabase';
+import { forwardGeocode, hasLngLat } from '../lib/geo';
 
 const MAX_FILE_BYTES = 450_000;
 
@@ -43,6 +49,30 @@ async function compressImage(file, maxEdge = 480, quality = 0.72) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
+async function resolveSchoolPin({ name, address, coords }) {
+  if (hasLngLat(coords)) {
+    return {
+      schoolAddress: address || name,
+      schoolCoords: { lng: Number(coords.lng), lat: Number(coords.lat) },
+    };
+  }
+  const query = (address || name || '').trim();
+  if (!query) return null;
+  const local = findSchoolInDatabase(query);
+  if (local) {
+    return {
+      schoolAddress: local.label,
+      schoolCoords: { lng: local.lng, lat: local.lat },
+    };
+  }
+  const geo = await forwardGeocode(query);
+  if (!geo) return null;
+  return {
+    schoolAddress: geo.label || query,
+    schoolCoords: { lng: geo.lng, lat: geo.lat },
+  };
+}
+
 export default function AddChildProfile() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
@@ -61,6 +91,8 @@ export default function AddChildProfile() {
   const [childName, setChildName] = useState('');
   const [grade, setGrade] = useState('Grade 5');
   const [school, setSchool] = useState('');
+  const [schoolAddress, setSchoolAddress] = useState('');
+  const [schoolCoords, setSchoolCoords] = useState(null);
   const [photoUrl, setPhotoUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -74,15 +106,22 @@ export default function AddChildProfile() {
         setChildName(target.name || '');
         setGrade(target.grade || 'Grade 5');
         setSchool(target.school || '');
+        setSchoolAddress(target.schoolAddress || target.school || '');
+        setSchoolCoords(target.schoolCoords || null);
         setPhotoUrl(target.photoUrl || '');
       }
       setSavedChildId(null);
       return;
     }
-    // New child — blank form (do not prefill from first child)
+    // New child — blank form; reuse a sibling school pin when available
+    const sibling = user?.children?.[0];
     setChildName('');
     setGrade('Grade 5');
-    setSchool(user?.school || user?.children?.[0]?.school || '');
+    setSchool(sibling?.school || user?.school || '');
+    setSchoolAddress(
+      sibling?.schoolAddress || sibling?.school || user?.schoolAddress || '',
+    );
+    setSchoolCoords(sibling?.schoolCoords || user?.schoolCoords || null);
     setPhotoUrl('');
     setSavedChildId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-init when switching child id / new form
@@ -116,9 +155,26 @@ export default function AddChildProfile() {
     }
     setLoading(true);
     try {
+      const pin = await resolveSchoolPin({
+        name: school.trim(),
+        address: schoolAddress.trim() || school.trim(),
+        coords: schoolCoords,
+      });
+      if (!pin) {
+        setError(
+          'Could not place that school on the map. Search and select an address, or tap the map.',
+        );
+        setLoading(false);
+        return;
+      }
+      setSchoolAddress(pin.schoolAddress);
+      setSchoolCoords(pin.schoolCoords);
+
       const payload = {
         name: childName.trim(),
         school: school.trim(),
+        schoolAddress: pin.schoolAddress,
+        schoolCoords: pin.schoolCoords,
         grade,
         photoUrl: photoUrl || '',
       };
@@ -139,6 +195,8 @@ export default function AddChildProfile() {
         setChildName('');
         setGrade('Grade 5');
         setSchool(payload.school);
+        setSchoolAddress(payload.schoolAddress);
+        setSchoolCoords(payload.schoolCoords);
         setPhotoUrl('');
         setSavedChildId(null);
         return;
@@ -159,7 +217,7 @@ export default function AddChildProfile() {
       <p className="mt-2 text-slate-600">
         {isEdit
           ? 'Update this child’s details and photo for driver handover.'
-          : 'You can add more than one child. Each profile has its own photo and school.'}
+          : 'You can add more than one child. Each profile has its own photo and school pin on the map.'}
       </p>
 
       {children.length > 0 && (
@@ -275,12 +333,57 @@ export default function AddChildProfile() {
           />
         </div>
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">School</label>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            School name
+          </label>
           <input
             value={school}
             onChange={(e) => setSchool(e.target.value)}
-            placeholder="e.g. Grange School, Ikeja"
+            placeholder="e.g. Grange School"
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 outline-none ring-emerald-600/30 focus:ring-2"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            School address
+          </label>
+          <AddressSearchInput
+            value={schoolAddress}
+            onChange={(v) => {
+              setSchoolAddress(v);
+              setSchoolCoords(null);
+            }}
+            onSelect={(place) => {
+              setSchoolAddress(place.label);
+              setSchoolCoords({ lng: place.lng, lat: place.lat });
+              if (!school.trim() && place.name) {
+                setSchool(place.name);
+              }
+            }}
+            placeholder="Search school address or tap the map…"
+          />
+          <p className="mt-1.5 text-xs text-slate-500">
+            This pin is the drop-off / pickup school on parent, driver, and
+            admin maps.
+          </p>
+          <LocationPinMap
+            className="mt-3 h-52 sm:h-64"
+            place={
+              hasLngLat(schoolCoords)
+                ? {
+                    label: schoolAddress || school || 'School',
+                    lng: schoolCoords.lng,
+                    lat: schoolCoords.lat,
+                  }
+                : null
+            }
+            onPin={({ label, lng, lat }) => {
+              setSchoolAddress(label);
+              setSchoolCoords({ lng, lat });
+              if (!school.trim()) {
+                setSchool(label.split('·')[0].split(',')[0].trim());
+              }
+            }}
           />
         </div>
         <div>

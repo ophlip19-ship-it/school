@@ -301,11 +301,24 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
         parent?.homeAddress ||
         `Home · pickup for ${child.name}`;
       rideDropoff =
-        rideDropoff || `${child.school || 'School'} · main gate`;
+        rideDropoff ||
+        child.schoolAddress ||
+        child.school ||
+        'School';
       if (!fromCoords && parent?.homeCoords?.lng != null) {
         fromCoords = {
           lng: parent.homeCoords.lng,
           lat: parent.homeCoords.lat,
+        };
+      }
+      if (
+        !toCoords &&
+        child.schoolCoords?.lng != null &&
+        child.schoolCoords?.lat != null
+      ) {
+        toCoords = {
+          lng: child.schoolCoords.lng,
+          lat: child.schoolCoords.lat,
         };
       }
     }
@@ -314,6 +327,18 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       return res.status(400).json({
         error: 'childId, pickup, dropoff, date, and time are required',
       });
+    }
+
+    // Prefer the child's saved school pin over a generic Lagos fallback
+    if (
+      !toCoords &&
+      child.schoolCoords?.lng != null &&
+      child.schoolCoords?.lat != null
+    ) {
+      toCoords = {
+        lng: child.schoolCoords.lng,
+        lat: child.schoolCoords.lat,
+      };
     }
 
     // Lagos-area fallbacks so maps always have anchors

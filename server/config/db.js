@@ -134,6 +134,8 @@ async function seedIfEmpty() {
     parentId: parent._id,
     name: 'Ada Bello',
     school: 'Greenfield School',
+    schoolAddress: 'Greenfield School · Victoria Island',
+    schoolCoords: { lng: 3.4219, lat: 6.4281 },
     grade: 'Grade 5',
   });
 

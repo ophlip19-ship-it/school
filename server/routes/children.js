@@ -1,16 +1,75 @@
 import { Router } from 'express';
-import Child from '../models/Child.js';
+import Child, { mapChildPublic } from '../models/Child.js';
+import Ride from '../models/Ride.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(requireAuth, requireRole('parent'));
 
+function parseLngLat(input) {
+  if (!input || typeof input !== 'object') return null;
+  const lng = Number(input.lng);
+  const lat = Number(input.lat);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  if (Math.abs(lng) > 180 || Math.abs(lat) > 90) return null;
+  return { lng, lat };
+}
+
+function coordsClose(a, b) {
+  if (!a || !b) return false;
+  return Math.abs(a.lng - b.lng) < 1e-4 && Math.abs(a.lat - b.lat) < 1e-4;
+}
+
+function dropoffLooksLikeSchool(ride, schoolName) {
+  const drop = String(ride.dropoff || '').toLowerCase();
+  const name = String(schoolName || '').trim().toLowerCase();
+  if (name && drop.includes(name)) return true;
+  return drop.includes('school') || drop.includes('main gate');
+}
+
+/** Keep upcoming rides' drop-off in sync when the child's school pin changes. */
+async function syncUpcomingSchoolDropoffs(child, previous) {
+  const nextCoords = parseLngLat(child.schoolCoords);
+  if (!nextCoords) return;
+
+  const nextLabel = String(
+    child.schoolAddress || child.school || 'School',
+  ).trim();
+  const prevCoords = parseLngLat(previous?.schoolCoords);
+  const prevName = String(
+    previous?.schoolAddress || previous?.school || '',
+  ).trim();
+
+  const rides = await Ride.find({
+    childId: child._id,
+    status: { $in: ['pending_payment', 'open', 'requested', 'assigned'] },
+  });
+
+  for (const ride of rides) {
+    const drop = parseLngLat(ride.dropoffCoords);
+    const matchesOldPin = coordsClose(drop, prevCoords);
+    const matchesOldName =
+      prevName &&
+      String(ride.dropoff || '')
+        .toLowerCase()
+        .includes(prevName.toLowerCase());
+    const firstPin =
+      !prevCoords && dropoffLooksLikeSchool(ride, child.school || prevName);
+
+    if (!matchesOldPin && !matchesOldName && !firstPin) continue;
+
+    ride.dropoff = nextLabel;
+    ride.dropoffCoords = nextCoords;
+    await ride.save();
+  }
+}
+
 router.get('/', async (req, res) => {
   const children = await Child.find({ parentId: req.user.id }).sort({
     createdAt: 1,
   });
-  res.json({ children: children.map((c) => c.toPublic()) });
+  res.json({ children: children.map((c) => mapChildPublic(c)) });
 });
 
 const MAX_PHOTO_CHARS = 900_000; // ~675KB base64
@@ -41,25 +100,33 @@ router.post('/', async (req, res) => {
     const {
       name,
       school = '',
+      schoolAddress = '',
+      schoolCoords = null,
       grade = 'Grade 5',
       photoUrl = '',
     } = req.body || {};
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Child name is required' });
     }
-    if (!String(school).trim()) {
+    const schoolName = String(school).trim();
+    if (!schoolName) {
       return res.status(400).json({ error: 'School is required' });
     }
+
+    const coords = parseLngLat(schoolCoords);
+    const address = String(schoolAddress || schoolName).trim();
 
     const child = await Child.create({
       parentId: req.user.id,
       name: name.trim(),
-      school: String(school).trim(),
+      school: schoolName,
+      schoolAddress: address,
+      schoolCoords: coords || { lng: null, lat: null },
       grade,
       photoUrl: normalizePhotoUrl(photoUrl) || '',
     });
 
-    res.status(201).json({ child: child.toPublic() });
+    res.status(201).json({ child: mapChildPublic(child) });
   } catch (err) {
     console.error('[children POST]', err);
     res.status(err.status || 500).json({
@@ -76,16 +143,37 @@ router.patch('/:id', async (req, res) => {
     });
     if (!existing) return res.status(404).json({ error: 'Child not found' });
 
-    const { name, school, grade, photoUrl } = req.body || {};
+    const previous = {
+      school: existing.school,
+      schoolAddress: existing.schoolAddress,
+      schoolCoords: existing.schoolCoords
+        ? {
+            lng: existing.schoolCoords.lng,
+            lat: existing.schoolCoords.lat,
+          }
+        : null,
+    };
+
+    const { name, school, schoolAddress, schoolCoords, grade, photoUrl } =
+      req.body || {};
     if (name != null) existing.name = name;
     if (school != null) existing.school = school;
+    if (schoolAddress != null) existing.schoolAddress = schoolAddress;
+    if (schoolCoords !== undefined) {
+      const coords = parseLngLat(schoolCoords);
+      existing.schoolCoords = coords || { lng: null, lat: null };
+    }
     if (grade != null) existing.grade = grade;
     if (photoUrl !== undefined) {
       existing.photoUrl = normalizePhotoUrl(photoUrl) ?? '';
     }
+    if (!String(existing.schoolAddress || '').trim()) {
+      existing.schoolAddress = existing.school || '';
+    }
     await existing.save();
+    await syncUpcomingSchoolDropoffs(existing, previous);
 
-    res.json({ child: existing.toPublic() });
+    res.json({ child: mapChildPublic(existing) });
   } catch (err) {
     console.error('[children PATCH]', err);
     res.status(err.status || 500).json({

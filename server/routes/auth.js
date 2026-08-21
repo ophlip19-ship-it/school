@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import User from '../models/User.js';
-import Child from '../models/Child.js';
+import Child, { mapChildPublic } from '../models/Child.js';
 import { requireAuth, signToken } from '../middleware/auth.js';
 
 const router = Router();
@@ -13,19 +13,15 @@ async function enrichUser(publicUser) {
     const children = await Child.find({ parentId: publicUser.id })
       .sort({ createdAt: 1 })
       .lean();
-    const mapped = children.map((c) => ({
-      id: c._id.toString(),
-      name: c.name,
-      school: c.school,
-      grade: c.grade,
-      photoUrl: c.photoUrl || '',
-    }));
+    const mapped = children.map((c) => mapChildPublic(c));
     const primary = mapped[0];
     return {
       ...publicUser,
       children: mapped,
       childName: primary?.name || '',
       school: primary?.school || '',
+      schoolAddress: primary?.schoolAddress || '',
+      schoolCoords: primary?.schoolCoords || null,
       childId: primary?.id || null,
     };
   }

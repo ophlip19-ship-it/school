@@ -27,7 +27,13 @@ export default function SelectChildren() {
       setError('Select a child to continue');
       return;
     }
-    setBookingDraft({ childId: child.id, childName: child.name, school: child.school });
+    setBookingDraft({
+      childId: child.id,
+      childName: child.name,
+      school: child.school,
+      schoolAddress: child.schoolAddress || child.school || '',
+      schoolCoords: child.schoolCoords || null,
+    });
     navigate('/pick-locations');
   };
 
@@ -68,8 +74,15 @@ export default function SelectChildren() {
             <div className="min-w-0 flex-1">
               <p className="text-lg font-semibold text-slate-900">{child.name}</p>
               <p className="text-sm text-slate-500">
-                {child.school} · {child.grade}
+                {child.school}
+                {child.grade ? ` · ${child.grade}` : ''}
               </p>
+              {child.schoolAddress &&
+              child.schoolAddress !== child.school ? (
+                <p className="truncate text-xs text-slate-400">
+                  {child.schoolAddress}
+                </p>
+              ) : null}
             </div>
             <input
               type="radio"
