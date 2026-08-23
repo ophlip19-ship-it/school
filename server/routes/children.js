@@ -21,15 +21,35 @@ function coordsClose(a, b) {
   return Math.abs(a.lng - b.lng) < 1e-4 && Math.abs(a.lat - b.lat) < 1e-4;
 }
 
-function dropoffLooksLikeSchool(ride, schoolName) {
-  const drop = String(ride.dropoff || '').toLowerCase();
+function labelLooksLikeSchool(label, schoolName) {
+  const text = String(label || '').toLowerCase();
   const name = String(schoolName || '').trim().toLowerCase();
-  if (name && drop.includes(name)) return true;
-  return drop.includes('school') || drop.includes('main gate');
+  if (name && text.includes(name)) return true;
+  return text.includes('school') || text.includes('main gate');
 }
 
-/** Keep upcoming rides' drop-off in sync when the child's school pin changes. */
-async function syncUpcomingSchoolDropoffs(child, previous) {
+function endMatchesOldSchool(label, coords, prevCoords, prevName, schoolName) {
+  const pin = parseLngLat(coords);
+  if (coordsClose(pin, prevCoords)) return true;
+  if (
+    prevName &&
+    String(label || '')
+      .toLowerCase()
+      .includes(prevName.toLowerCase())
+  ) {
+    return true;
+  }
+  if (!prevCoords && labelLooksLikeSchool(label, schoolName || prevName)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Keep upcoming rides' school endpoint in sync when the child's school pin
+ * changes — both drop-off (home → school) and pickup (school → home).
+ */
+async function syncUpcomingSchoolPins(child, previous) {
   const nextCoords = parseLngLat(child.schoolCoords);
   if (!nextCoords) return;
 
@@ -40,6 +60,7 @@ async function syncUpcomingSchoolDropoffs(child, previous) {
   const prevName = String(
     previous?.schoolAddress || previous?.school || '',
   ).trim();
+  const schoolName = child.school || prevName;
 
   const rides = await Ride.find({
     childId: child._id,
@@ -47,20 +68,31 @@ async function syncUpcomingSchoolDropoffs(child, previous) {
   });
 
   for (const ride of rides) {
-    const drop = parseLngLat(ride.dropoffCoords);
-    const matchesOldPin = coordsClose(drop, prevCoords);
-    const matchesOldName =
-      prevName &&
-      String(ride.dropoff || '')
-        .toLowerCase()
-        .includes(prevName.toLowerCase());
-    const firstPin =
-      !prevCoords && dropoffLooksLikeSchool(ride, child.school || prevName);
+    const dropMatches = endMatchesOldSchool(
+      ride.dropoff,
+      ride.dropoffCoords,
+      prevCoords,
+      prevName,
+      schoolName,
+    );
+    const pickMatches = endMatchesOldSchool(
+      ride.pickup,
+      ride.pickupCoords,
+      prevCoords,
+      prevName,
+      schoolName,
+    );
 
-    if (!matchesOldPin && !matchesOldName && !firstPin) continue;
+    if (!dropMatches && !pickMatches) continue;
 
-    ride.dropoff = nextLabel;
-    ride.dropoffCoords = nextCoords;
+    if (dropMatches) {
+      ride.dropoff = nextLabel;
+      ride.dropoffCoords = nextCoords;
+    }
+    if (pickMatches) {
+      ride.pickup = nextLabel;
+      ride.pickupCoords = nextCoords;
+    }
     await ride.save();
   }
 }
@@ -171,7 +203,7 @@ router.patch('/:id', async (req, res) => {
       existing.schoolAddress = existing.school || '';
     }
     await existing.save();
-    await syncUpcomingSchoolDropoffs(existing, previous);
+    await syncUpcomingSchoolPins(existing, previous);
 
     res.json({ child: mapChildPublic(existing) });
   } catch (err) {

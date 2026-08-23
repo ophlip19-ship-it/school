@@ -492,6 +492,51 @@ export async function resolveDestination({
 }
 
 /**
+ * Resolve any booking endpoint: home | school | current | custom.
+ */
+export async function resolvePlace({
+  mode,
+  homeAddress,
+  homeCoords,
+  schoolName,
+  schoolAddress,
+  schoolCoords,
+  customLabel,
+  customCoords,
+}) {
+  const m = String(mode || '').toLowerCase();
+  if (m === 'school') {
+    return resolveDestination({
+      mode: 'school',
+      schoolName,
+      schoolAddress: schoolAddress || schoolName,
+      schoolCoords,
+    });
+  }
+  if (m === 'home' || m === 'current') {
+    return resolvePickup({
+      mode: m,
+      homeAddress,
+      homeCoords,
+    });
+  }
+  // custom — address book first (destination resolver), then geocode
+  try {
+    return await resolveDestination({
+      mode: 'custom',
+      customLabel,
+      customCoords,
+    });
+  } catch {
+    return resolvePickup({
+      mode: 'custom',
+      customLabel,
+      customCoords,
+    });
+  }
+}
+
+/**
  * Capture parent GPS to send to the driver when booking a ride.
  * Returns null if permission is denied / unavailable (booking still proceeds).
  */

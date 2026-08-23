@@ -294,32 +294,25 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     let fromCoords = parseCoords(pickupCoords);
     let toCoords = parseCoords(dropoffCoords);
 
-    // Instant rides fill sensible defaults when locations are omitted
+    const fromSchool = String(tripType || '').toLowerCase() === 'pickup';
+    const homeLabel =
+      parent?.homeAddress || `Home · ${fromSchool ? 'drop-off' : 'pickup'} for ${child.name}`;
+    const schoolLabel = child.schoolAddress || child.school || 'School';
+    const homeCoordsParsed = parseCoords(parent?.homeCoords);
+    const schoolCoordsParsed = parseCoords(child.schoolCoords);
+
+    // Instant rides fill home ↔ school from saved pins when locations are omitted
     if (instant) {
-      ridePickup =
-        ridePickup ||
-        parent?.homeAddress ||
-        `Home · pickup for ${child.name}`;
-      rideDropoff =
-        rideDropoff ||
-        child.schoolAddress ||
-        child.school ||
-        'School';
-      if (!fromCoords && parent?.homeCoords?.lng != null) {
-        fromCoords = {
-          lng: parent.homeCoords.lng,
-          lat: parent.homeCoords.lat,
-        };
-      }
-      if (
-        !toCoords &&
-        child.schoolCoords?.lng != null &&
-        child.schoolCoords?.lat != null
-      ) {
-        toCoords = {
-          lng: child.schoolCoords.lng,
-          lat: child.schoolCoords.lat,
-        };
+      if (fromSchool) {
+        ridePickup = ridePickup || schoolLabel;
+        rideDropoff = rideDropoff || homeLabel;
+        if (!fromCoords && schoolCoordsParsed) fromCoords = schoolCoordsParsed;
+        if (!toCoords && homeCoordsParsed) toCoords = homeCoordsParsed;
+      } else {
+        ridePickup = ridePickup || homeLabel;
+        rideDropoff = rideDropoff || schoolLabel;
+        if (!fromCoords && homeCoordsParsed) fromCoords = homeCoordsParsed;
+        if (!toCoords && schoolCoordsParsed) toCoords = schoolCoordsParsed;
       }
     }
 
@@ -329,21 +322,25 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       });
     }
 
-    // Prefer the child's saved school pin over a generic Lagos fallback
-    if (
-      !toCoords &&
-      child.schoolCoords?.lng != null &&
-      child.schoolCoords?.lat != null
-    ) {
-      toCoords = {
-        lng: child.schoolCoords.lng,
-        lat: child.schoolCoords.lat,
-      };
+    // Fill the missing end from the child's school pin or parent home
+    if (!fromCoords) {
+      fromCoords = fromSchool ? schoolCoordsParsed : homeCoordsParsed;
+    }
+    if (!toCoords) {
+      toCoords = fromSchool ? homeCoordsParsed : schoolCoordsParsed;
     }
 
     // Lagos-area fallbacks so maps always have anchors
-    if (!fromCoords) fromCoords = { lng: 3.4734, lat: 6.4474 };
-    if (!toCoords) toCoords = { lng: 3.4219, lat: 6.4281 };
+    if (!fromCoords) {
+      fromCoords = fromSchool
+        ? { lng: 3.4219, lat: 6.4281 }
+        : { lng: 3.4734, lat: 6.4474 };
+    }
+    if (!toCoords) {
+      toCoords = fromSchool
+        ? { lng: 3.4734, lat: 6.4474 }
+        : { lng: 3.4219, lat: 6.4281 };
+    }
 
     if (assignMode === 'choose') {
       if (!driverId) {

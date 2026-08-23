@@ -2,20 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Home, Navigation, School, Map } from 'lucide-react';
+import { MapPin, Home, Navigation, School, Map, ArrowLeftRight } from 'lucide-react';
 import { getBookingDraft, setBookingDraft } from '../lib/booking';
 import { useAuth } from '../context/AuthContext';
 import {
   DEFAULT_HOME,
   getCurrentPosition,
   mapboxToken,
-  resolveDestination,
-  resolvePickup,
+  resolvePlace,
   reverseGeocode,
   captureParentLocationForBooking,
   schoolLabelFromChild,
   schoolCoordsFromChild,
 } from '../lib/geo';
+import {
+  modesForTripType,
+  tripTypeFromModes,
+  tripTypeHint,
+  tripTypeLabel,
+} from '../lib/trip';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
 import MapBottomDrawer from '../components/MapBottomDrawer';
 import AddressSearchInput from '../components/AddressSearchInput';
@@ -44,8 +49,14 @@ export default function PickLocations() {
   const searchMarker = useRef(null);
   const geocoderCleanup = useRef(null);
 
-  const [pickupMode, setPickupMode] = useState(draft.pickupMode || 'home');
-  const [dropoffMode, setDropoffMode] = useState(draft.dropoffMode || 'school');
+  const initialModes = draft.pickupMode || draft.dropoffMode
+    ? {
+        pickupMode: draft.pickupMode || 'home',
+        dropoffMode: draft.dropoffMode || 'school',
+      }
+    : modesForTripType(draft.tripType || 'dropoff');
+  const [pickupMode, setPickupMode] = useState(initialModes.pickupMode);
+  const [dropoffMode, setDropoffMode] = useState(initialModes.dropoffMode);
   const [customPickup, setCustomPickup] = useState(draft.customPickup || '');
   const [customDropoff, setCustomDropoff] = useState(draft.customDropoff || '');
   const [pickupPlace, setPickupPlace] = useState(
@@ -206,33 +217,35 @@ export default function PickLocations() {
     };
   }, []);
 
+  const placeArgs = {
+    homeAddress,
+    homeCoords: user?.homeCoords,
+    schoolName: school,
+    schoolAddress: school,
+    schoolCoords,
+  };
+
   // Resolve home/school/current when mode changes (not custom pin)
   useEffect(() => {
     if (!mapReady) return undefined;
+    if (pickupMode === 'custom') return undefined;
     let cancelled = false;
 
     (async () => {
       try {
-        if (pickupMode === 'home') {
-          const from = await resolvePickup({
-            mode: 'home',
-            homeAddress,
-            homeCoords: user?.homeCoords,
-          });
-          if (!cancelled) setPickupPlace(from);
-        } else if (pickupMode === 'current') {
-          const from = await resolvePickup({ mode: 'current' });
-          if (!cancelled) {
-            setPickupPlace(from);
-            setCustomPickup(from.label);
-          }
+        const from = await resolvePlace({
+          mode: pickupMode,
+          ...placeArgs,
+        });
+        if (!cancelled) {
+          setPickupPlace(from);
+          if (pickupMode === 'current') setCustomPickup(from.label);
         }
-        // custom: keep pickupPlace from geocoder / map tap
       } catch (err) {
         if (!cancelled) {
           setError(
             err?.message?.includes('denied') || err?.code === 1
-              ? 'Location permission denied. Allow location or choose Home / search.'
+              ? 'Location permission denied. Allow location or choose Home / School / search.'
               : err.message || 'Could not resolve pickup',
           );
         }
@@ -242,28 +255,34 @@ export default function PickLocations() {
     return () => {
       cancelled = true;
     };
-  }, [pickupMode, mapReady, homeAddress, user?.homeCoords]);
+    // placeArgs fields listed explicitly
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickupMode, mapReady, homeAddress, user?.homeCoords, school, schoolCoords]);
 
   useEffect(() => {
     if (!mapReady) return undefined;
+    if (dropoffMode === 'custom') return undefined;
     let cancelled = false;
 
     (async () => {
-      if (dropoffMode === 'school') {
-        const to = await resolveDestination({
-          mode: 'school',
-          schoolName: school,
-          schoolAddress: school,
-          schoolCoords,
+      try {
+        const to = await resolvePlace({
+          mode: dropoffMode,
+          ...placeArgs,
         });
         if (!cancelled) setDropoffPlace(to);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Could not resolve drop-off');
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [dropoffMode, mapReady, school, schoolCoords]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dropoffMode, mapReady, school, schoolCoords, homeAddress, user?.homeCoords]);
 
   // Sync markers + fit
   useEffect(() => {
@@ -281,26 +300,18 @@ export default function PickLocations() {
       let to = dropoffPlace;
 
       if (!from) {
-        from = await resolvePickup({
-          mode:
-            pickupMode === 'current'
-              ? 'current'
-              : pickupMode === 'custom'
-                ? 'custom'
-                : 'home',
-          homeAddress,
-          homeCoords: user?.homeCoords,
-          customLabel: customPickup || homeAddress,
+        from = await resolvePlace({
+          mode: pickupMode === 'custom' ? 'custom' : pickupMode,
+          ...placeArgs,
+          customLabel: customPickup || pickupPlace?.label || homeAddress,
           customCoords: pickupPlace,
         });
       }
       if (!to) {
-        to = await resolveDestination({
-          mode: dropoffMode === 'custom' ? 'custom' : 'school',
-          schoolName: school,
-          schoolAddress: school,
-          schoolCoords,
-          customLabel: customDropoff || school || 'School',
+        to = await resolvePlace({
+          mode: dropoffMode === 'custom' ? 'custom' : dropoffMode,
+          ...placeArgs,
+          customLabel: customDropoff || dropoffPlace?.label || school || 'School',
           customCoords: dropoffPlace,
         });
       }
@@ -315,6 +326,7 @@ export default function PickLocations() {
         dropoffCoords: { lng: to.lng, lat: to.lat },
         pickupMode,
         dropoffMode,
+        tripType: tripTypeFromModes(pickupMode, dropoffMode),
         customPickup: customPickup || from.label,
         customDropoff: customDropoff || to.label,
         school,
