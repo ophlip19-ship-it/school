@@ -26,15 +26,20 @@ import {
   resolvePickup,
   captureParentLocationForBooking,
   formatDistanceKm,
+  formatEtaMinutes,
+  schoolLabelFromChild,
+  childHasSchool,
   DEFAULT_HOME,
 } from '../lib/geo';
 import { quoteTripFare } from '../lib/pricing';
+import { tripTypeFromModes } from '../lib/trip';
 import AddressSearchInput from '../components/AddressSearchInput';
 import DashboardDrawer, {
   HamburgerButton,
 } from '../components/DashboardDrawer';
 import { ErrorBanner } from '../components/ErrorState';
 import PageShell from '../components/PageShell';
+import TripRouteMap from '../components/TripRouteMap';
 
 function ChildAvatar({ child, size = 'md' }) {
   const dim =
@@ -265,6 +270,11 @@ export default function HomeDashboard() {
   const [dropoffMode, setDropoffMode] = useState('school'); // school | custom
   const [customDropoff, setCustomDropoff] = useState('');
   const [customDropoffPlace, setCustomDropoffPlace] = useState(null);
+  const [routePickup, setRoutePickup] = useState(null);
+  const [routeDropoff, setRouteDropoff] = useState(null);
+  const [fareQuote, setFareQuote] = useState(null);
+  const [fareLoading, setFareLoading] = useState(false);
+  const [schoolDestError, setSchoolDestError] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState('');
@@ -303,6 +313,8 @@ export default function HomeDashboard() {
   const school = user?.school || children[0]?.school || 'School';
   const selectedChild =
     children.find((c) => c.id === selectedChildId) || children[0] || null;
+  const selectedSchoolLabel = schoolLabelFromChild(selectedChild);
+  const selectedChildHasSchool = childHasSchool(selectedChild);
 
   // Rank free drivers by distance to pickup whenever locations change
   useEffect(() => {
@@ -345,6 +357,90 @@ export default function HomeDashboard() {
     pickupMode,
     dropoffMode,
     customDropoffPlace,
+    user?.homeAddress,
+    user?.homeCoords,
+  ]);
+
+  // Resolve school (or custom) destination from the selected child, then
+  // draw the route and preview fare from pickup → destination.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!selectedChild) {
+        setRoutePickup(null);
+        setRouteDropoff(null);
+        setFareQuote(null);
+        setSchoolDestError('');
+        return;
+      }
+      if (dropoffMode === 'school' && !childHasSchool(selectedChild)) {
+        setRoutePickup(null);
+        setRouteDropoff(null);
+        setFareQuote(null);
+        setSchoolDestError(
+          'This child has no school yet. Add a school address on the child profile.',
+        );
+        return;
+      }
+      if (
+        dropoffMode === 'custom' &&
+        !customDropoffPlace &&
+        !customDropoff.trim()
+      ) {
+        setRouteDropoff(null);
+        setFareQuote(null);
+        setSchoolDestError('');
+        return;
+      }
+
+      setSchoolDestError('');
+      setFareLoading(true);
+      try {
+        const from = await resolvePickup({
+          mode: pickupMode === 'current' ? 'current' : 'home',
+          homeAddress: user?.homeAddress || DEFAULT_HOME.label,
+          homeCoords: user?.homeCoords,
+        });
+        const to = await resolveDestination({
+          mode: dropoffMode === 'custom' ? 'custom' : 'school',
+          child: selectedChild,
+          schoolName: selectedChild.school,
+          schoolAddress: selectedChild.schoolAddress || selectedChild.school,
+          schoolCoords: selectedChild.schoolCoords,
+          customLabel: customDropoff.trim(),
+          customCoords: customDropoffPlace,
+        });
+        if (cancelled) return;
+        setRoutePickup(from);
+        setRouteDropoff(to);
+        const quote = await quoteTripFare(from, to);
+        if (cancelled) return;
+        setFareQuote(quote);
+      } catch (err) {
+        if (!cancelled) {
+          setRouteDropoff(null);
+          setFareQuote(null);
+          setSchoolDestError(
+            err.message ||
+              (dropoffMode === 'school'
+                ? 'Could not place this school on the map.'
+                : 'Could not resolve destination.'),
+          );
+        }
+      } finally {
+        if (!cancelled) setFareLoading(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedChild,
+    pickupMode,
+    dropoffMode,
+    customDropoffPlace,
+    customDropoff,
     user?.homeAddress,
     user?.homeCoords,
   ]);
@@ -420,6 +516,12 @@ export default function HomeDashboard() {
       setInstantError('Enter a destination address, or choose School.');
       return;
     }
+    if (dropoffMode === 'school' && !childHasSchool(child)) {
+      setInstantError(
+        'This child has no school address. Add a school on the child profile, or search a destination.',
+      );
+      return;
+    }
 
     setInstantLoading(true);
     try {
@@ -432,7 +534,10 @@ export default function HomeDashboard() {
       });
       const to = await resolveDestination({
         mode: dropoffMode === 'custom' ? 'custom' : 'school',
+        child,
         schoolName: child.school || school,
+        schoolAddress: child.schoolAddress || child.school,
+        schoolCoords: child.schoolCoords,
         customLabel: customDropoff.trim(),
         customCoords: customDropoffPlace,
       });
@@ -451,7 +556,10 @@ export default function HomeDashboard() {
             ? selectedDriver.id
             : undefined,
         instant: true,
-        tripType: 'pickup',
+        tripType: tripTypeFromModes(
+          pickupMode,
+          dropoffMode === 'school' ? 'school' : 'custom',
+        ),
         pickup: from.label,
         dropoff: to.label,
         pickupCoords: { lng: from.lng, lat: from.lat },
@@ -611,13 +719,26 @@ export default function HomeDashboard() {
                   <button
                     type="button"
                     onClick={() => setDropoffMode('school')}
-                    className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                    className={`flex items-start gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       dropoffMode === 'school'
                         ? 'bg-white font-semibold text-slate-900'
                         : 'bg-white/10 text-white hover:bg-white/15'
                     }`}
                   >
-                    <School size={16} /> School
+                    <School size={16} className="mt-0.5 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block">School</span>
+                      <span
+                        className={`mt-0.5 block truncate text-[11px] font-normal ${
+                          dropoffMode === 'school'
+                            ? 'text-slate-500'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {selectedSchoolLabel ||
+                          'Add a school on the child profile'}
+                      </span>
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -652,8 +773,53 @@ export default function HomeDashboard() {
                     />
                   </div>
                 )}
+                {dropoffMode === 'school' &&
+                  selectedChild &&
+                  !selectedChildHasSchool && (
+                    <p className="mt-2 text-xs text-amber-200">
+                      No school pin for {selectedChild.name}.{' '}
+                      <Link
+                        to={`/add-child?id=${selectedChild.id}`}
+                        className="font-semibold underline underline-offset-2"
+                      >
+                        Add school address
+                      </Link>
+                    </p>
+                  )}
               </div>
             </div>
+
+            {(routePickup || routeDropoff) && (
+              <div className="mt-4 overflow-hidden rounded-2xl">
+                <TripRouteMap
+                  pickup={routePickup}
+                  dropoff={routeDropoff}
+                  className="h-40"
+                />
+              </div>
+            )}
+
+            {(fareLoading || fareQuote || schoolDestError) && (
+              <div className="mt-3 rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-200">
+                {schoolDestError ? (
+                  <p className="text-amber-200">{schoolDestError}</p>
+                ) : fareLoading && !fareQuote ? (
+                  <p>Calculating route and fare…</p>
+                ) : fareQuote ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>
+                      {formatDistanceKm(fareQuote.distanceKm) || '—'}
+                      {fareQuote.etaMinutes != null
+                        ? ` · ${formatEtaMinutes(fareQuote.etaMinutes)}`
+                        : ''}
+                    </span>
+                    <span className="font-bold text-white">
+                      {formatMoney(fareQuote.fareCents)}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             <div className="mt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -799,6 +965,7 @@ export default function HomeDashboard() {
               disabled={
                 instantLoading ||
                 children.length === 0 ||
+                (dropoffMode === 'school' && !selectedChildHasSchool) ||
                 (assignMode === 'choose' && availableDrivers.length === 0)
               }
               className="mt-5 w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -807,20 +974,25 @@ export default function HomeDashboard() {
                 ? 'Creating ride…'
                 : children.length === 0
                   ? 'Add a child to book'
-                  : assignMode === 'choose' && availableDrivers.length === 0
+                  : dropoffMode === 'school' && !selectedChildHasSchool
+                    ? 'Add a school to book'
+                    : assignMode === 'choose' && availableDrivers.length === 0
                     ? 'No drivers available'
                     : (() => {
+                        const fareBit = fareQuote
+                          ? ` · ${formatMoney(fareQuote.fareCents)}`
+                          : '';
                         if (assignMode === 'nearest') {
                           return activeRides.length > 0
-                            ? 'Book another · nearest'
-                            : 'Book nearest driver';
+                            ? `Book another · nearest${fareBit}`
+                            : `Book nearest driver${fareBit}`;
                         }
                         if (selectedDriver) {
                           return activeRides.length > 0
-                            ? `Book another · ${selectedDriver.name}`
-                            : `Book ${selectedDriver.name}`;
+                            ? `Book another · ${selectedDriver.name}${fareBit}`
+                            : `Book ${selectedDriver.name}${fareBit}`;
                         }
-                        return 'Book instant ride';
+                        return `Book instant ride${fareBit}`;
                       })()}
             </button>
             <Link

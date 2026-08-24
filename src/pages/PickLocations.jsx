@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Home, Navigation, School, Map, ArrowLeftRight } from 'lucide-react';
+import { MapPin, Home, Navigation, School, Map } from 'lucide-react';
 import { getBookingDraft, setBookingDraft } from '../lib/booking';
 import { useAuth } from '../context/AuthContext';
+import { formatMoney } from '../lib/api';
 import {
   DEFAULT_HOME,
   getCurrentPosition,
@@ -14,12 +15,16 @@ import {
   captureParentLocationForBooking,
   schoolLabelFromChild,
   schoolCoordsFromChild,
+  schoolResolveArgsFromChild,
+  fetchDrivingRoute,
+  formatDistanceKm,
+  formatEtaMinutes,
+  childHasSchool,
 } from '../lib/geo';
+import { quoteTripFare } from '../lib/pricing';
 import {
   modesForTripType,
   tripTypeFromModes,
-  tripTypeHint,
-  tripTypeLabel,
 } from '../lib/trip';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
 import MapBottomDrawer from '../components/MapBottomDrawer';
@@ -33,13 +38,18 @@ export default function PickLocations() {
     (user?.children || []).find((c) => c.id === draft.childId) ||
     user?.children?.[0] ||
     null;
+  const childSchool = schoolResolveArgsFromChild(selectedChild);
   const school =
+    childSchool.schoolAddress ||
     draft.schoolAddress ||
     draft.school ||
     schoolLabelFromChild(selectedChild) ||
     '';
   const schoolCoords =
-    draft.schoolCoords || schoolCoordsFromChild(selectedChild) || null;
+    childSchool.schoolCoords ||
+    draft.schoolCoords ||
+    schoolCoordsFromChild(selectedChild) ||
+    null;
   const homeAddress = user?.homeAddress || 'Home · 12 Admiralty Way, Lekki';
 
   const mapContainer = useRef(null);
@@ -83,6 +93,7 @@ export default function PickLocations() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mapError, setMapError] = useState('');
+  const [fareQuote, setFareQuote] = useState(null);
 
   const placeMarker = useCallback((kind, place) => {
     if (!map.current || !place || place.lng == null || place.lat == null) return;
@@ -218,9 +229,10 @@ export default function PickLocations() {
   }, []);
 
   const placeArgs = {
+    child: selectedChild,
     homeAddress,
     homeCoords: user?.homeCoords,
-    schoolName: school,
+    schoolName: childSchool.schoolName || school,
     schoolAddress: school,
     schoolCoords,
   };
@@ -292,6 +304,54 @@ export default function PickLocations() {
     fitPlaces(pickupPlace, dropoffPlace);
   }, [mapReady, pickupPlace, dropoffPlace, placeMarker, fitPlaces]);
 
+  // Draw driving route and quote fare once both pins are set
+  useEffect(() => {
+    if (!mapReady || !map.current || !pickupPlace || !dropoffPlace) {
+      setFareQuote(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      const route = await fetchDrivingRoute(pickupPlace, dropoffPlace, {
+        steps: false,
+      });
+      if (cancelled || !map.current) return;
+      if (route?.geometry) {
+        const feature = { type: 'Feature', geometry: route.geometry };
+        if (map.current.getSource('trip-route')) {
+          map.current.getSource('trip-route').setData(feature);
+        } else {
+          map.current.addSource('trip-route', {
+            type: 'geojson',
+            data: feature,
+          });
+          map.current.addLayer({
+            id: 'trip-route-line',
+            type: 'line',
+            source: 'trip-route',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+              'line-color': '#10b981',
+              'line-width': 4,
+              'line-opacity': 0.85,
+            },
+          });
+        }
+      }
+      const quote = await quoteTripFare(pickupPlace, dropoffPlace);
+      if (!cancelled) {
+        setFareQuote(
+          quote
+            ? { ...quote, etaMinutes: quote.etaMinutes ?? route?.etaMinutes }
+            : null,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mapReady, pickupPlace, dropoffPlace]);
+
   const confirm = async () => {
     setError('');
     setLoading(true);
@@ -329,9 +389,11 @@ export default function PickLocations() {
         tripType: tripTypeFromModes(pickupMode, dropoffMode),
         customPickup: customPickup || from.label,
         customDropoff: customDropoff || to.label,
-        school,
+        school: childSchool.schoolName || school,
         schoolAddress: school,
         schoolCoords,
+        distanceKm: fareQuote?.distanceKm ?? null,
+        fareCents: fareQuote?.fareCents ?? null,
         parentLocation: parentLocation || null,
       });
       navigate('/schedule');
@@ -542,7 +604,10 @@ export default function PickLocations() {
               <School size={18} className="text-blue-600" />
               <span className="text-sm font-semibold text-slate-900">School</span>
               <span className="line-clamp-2 text-[11px] text-slate-500">
-                {school || 'Add a school on the child profile'}
+                {school ||
+                  (selectedChild
+                    ? `No school for ${selectedChild.name}`
+                    : 'Add a school on the child profile')}
               </span>
             </button>
             <button
@@ -592,7 +657,35 @@ export default function PickLocations() {
               ✓ {dropoffPlace.label}
             </p>
           )}
+          {dropoffMode === 'school' &&
+            selectedChild &&
+            !childHasSchool(selectedChild) && (
+              <p className="mt-2 text-xs text-amber-800">
+                Add a school address on{' '}
+                <Link
+                  to={`/add-child?id=${selectedChild.id}`}
+                  className="font-semibold underline"
+                >
+                  {selectedChild.name}&apos;s profile
+                </Link>{' '}
+                to route to school.
+              </p>
+            )}
         </div>
+
+        {fareQuote && pickupPlace && dropoffPlace && (
+          <div className="mt-4 flex items-center justify-between rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
+            <span className="text-emerald-800">
+              {formatDistanceKm(fareQuote.distanceKm) || '—'}
+              {fareQuote.etaMinutes != null
+                ? ` · ${formatEtaMinutes(fareQuote.etaMinutes)}`
+                : ''}
+            </span>
+            <span className="font-bold text-emerald-900">
+              {formatMoney(fareQuote.fareCents)}
+            </span>
+          </div>
+        )}
 
         {error && (
           <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -604,13 +697,20 @@ export default function PickLocations() {
             loading ||
             !pickupPlace ||
             !dropoffPlace ||
+            (dropoffMode === 'school' &&
+              selectedChild &&
+              !childHasSchool(selectedChild)) ||
             (pickupMode === 'custom' && !pickupPlace) ||
             (dropoffMode === 'custom' && !dropoffPlace)
           }
           onClick={confirm}
           className="mt-6 w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? 'Saving locations…' : 'Confirm locations'}
+          {loading
+            ? 'Saving locations…'
+            : fareQuote
+              ? `Confirm · ${formatMoney(fareQuote.fareCents)}`
+              : 'Confirm locations'}
         </button>
       </MapBottomDrawer>
     </div>

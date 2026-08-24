@@ -75,11 +75,14 @@ export async function quoteTripFare(pickupCoords, dropoffCoords) {
       steps: false,
     });
     if (route?.distanceKm != null) {
-      return calculateFarePreview({
-        distanceKm: route.distanceKm,
-        pickupCoords,
-        dropoffCoords,
-      });
+      return {
+        ...calculateFarePreview({
+          distanceKm: route.distanceKm,
+          pickupCoords,
+          dropoffCoords,
+        }),
+        etaMinutes: route.etaMinutes ?? null,
+      };
     }
   } catch {
     /* fall through */

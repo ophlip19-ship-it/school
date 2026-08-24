@@ -404,12 +404,33 @@ export function schoolCoordsFromChild(child) {
   };
 }
 
+/** True when the child profile has a school name, address, or map pin. */
+export function childHasSchool(child) {
+  return Boolean(schoolLabelFromChild(child) || schoolCoordsFromChild(child));
+}
+
+/**
+ * Args for resolveDestination / resolvePlace from a child profile.
+ * Always prefer the saved school address + pin over the school name alone.
+ */
+export function schoolResolveArgsFromChild(child) {
+  if (!child) {
+    return { schoolName: '', schoolAddress: '', schoolCoords: null };
+  }
+  return {
+    schoolName: String(child.school || '').trim(),
+    schoolAddress: schoolLabelFromChild(child),
+    schoolCoords: schoolCoordsFromChild(child),
+  };
+}
+
 /**
  * Resolve destination: school | custom
  * Prefer the child profile pin, then local address database, then Mapbox.
  */
 export async function resolveDestination({
   mode,
+  child,
   schoolName,
   schoolAddress,
   schoolCoords,
@@ -427,16 +448,27 @@ export async function resolveDestination({
     /* address DB unavailable */
   }
 
+  const childSchool = schoolResolveArgsFromChild(child);
+  const resolvedSchoolName = (schoolName || childSchool.schoolName || '').trim();
+  const resolvedSchoolAddress = (
+    schoolAddress ||
+    childSchool.schoolAddress ||
+    resolvedSchoolName
+  ).trim();
+  const resolvedSchoolCoords = hasLngLat(schoolCoords)
+    ? schoolCoords
+    : childSchool.schoolCoords;
+
   if (mode === 'school') {
-    if (hasLngLat(schoolCoords)) {
-      const label = (schoolAddress || schoolName || 'School').trim();
+    if (hasLngLat(resolvedSchoolCoords)) {
+      const label = (resolvedSchoolAddress || resolvedSchoolName || 'School').trim();
       return {
         label,
-        lng: Number(schoolCoords.lng),
-        lat: Number(schoolCoords.lat),
+        lng: Number(resolvedSchoolCoords.lng),
+        lat: Number(resolvedSchoolCoords.lat),
       };
     }
-    const name = (schoolAddress || schoolName || '').trim();
+    const name = (resolvedSchoolAddress || resolvedSchoolName || '').trim();
     if (!name) {
       throw new Error(
         'This child has no school yet. Add a school on the child profile, or search a destination.',
@@ -496,6 +528,7 @@ export async function resolveDestination({
  */
 export async function resolvePlace({
   mode,
+  child,
   homeAddress,
   homeCoords,
   schoolName,
@@ -508,6 +541,7 @@ export async function resolvePlace({
   if (m === 'school') {
     return resolveDestination({
       mode: 'school',
+      child,
       schoolName,
       schoolAddress: schoolAddress || schoolName,
       schoolCoords,
