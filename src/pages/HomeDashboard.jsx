@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   MapPin,
-  Clock,
   AlertCircle,
   Plus,
   ChevronRight,
@@ -33,6 +32,12 @@ import {
 } from '../lib/geo';
 import { quoteTripFare } from '../lib/pricing';
 import { tripTypeFromModes } from '../lib/trip';
+import {
+  childForRide,
+  isTrackableStatus,
+  rideForChild,
+  tripStatusLabel,
+} from '../lib/childTrips';
 import AddressSearchInput from '../components/AddressSearchInput';
 import DashboardDrawer, {
   HamburgerButton,
@@ -160,83 +165,106 @@ function SecondaryPanel({
 const canParentCancel = (status) =>
   ['pending_payment', 'open', 'requested'].includes(status);
 
-function ActiveRideCard({ ride, onCancel, cancelling }) {
-  const tone =
-    ride.status === 'requested'
-      ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20'
-      : ride.status === 'open' || ride.status === 'pending_payment'
-        ? 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-blue-600/20'
-        : 'bg-gradient-to-r from-emerald-600 to-teal-500 shadow-emerald-600/20';
+function rideTone(status) {
+  if (status === 'requested') {
+    return 'from-amber-500 to-orange-500 shadow-amber-500/20';
+  }
+  if (status === 'open' || status === 'pending_payment') {
+    return 'from-blue-600 to-indigo-500 shadow-blue-600/20';
+  }
+  return 'from-emerald-600 to-teal-500 shadow-emerald-600/20';
+}
 
-  const statusLabel =
-    ride.status === 'requested'
-      ? 'Waiting for driver'
-      : ride.status === 'open'
-        ? 'Finding a driver'
-        : ride.status === 'pending_payment'
-          ? 'Payment needed'
-          : `Active trip · ${ride.status}`;
+function rideSummary(ride) {
+  if (ride.status === 'requested') {
+    return ride.driverName
+      ? `Waiting · ${ride.driverName}`
+      : 'Waiting for driver';
+  }
+  if (ride.status === 'open') return 'Finding a driver';
+  if (ride.status === 'pending_payment') return 'Payment needed';
+  return ride.driverName || 'Waiting for driver';
+}
 
+function ActiveRideCard({
+  ride,
+  child,
+  onCancel,
+  cancelling,
+  onSelect,
+  featured = false,
+}) {
   const showCancel = canParentCancel(ride.status);
+  const trackable = isTrackableStatus(ride.status);
+  const showPin =
+    ride.paymentStatus === 'paid' &&
+    ['assigned', 'in_transit'].includes(ride.status) &&
+    ride.handoverPin;
 
   return (
-    <div className={`rounded-3xl p-5 text-white shadow-lg sm:p-6 ${tone}`}>
-      <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
-        {statusLabel}
-      </p>
-      <h3 className="mt-2 text-xl font-bold sm:text-2xl">{ride.childName}</h3>
-      <div className="mt-4 space-y-1 text-sm text-white/90">
-        {ride.status === 'requested' ? (
-          <p>
-            Waiting for {ride.driverName || 'your chosen driver'} to accept this
-            ride…
+    <article
+      className={`flex h-full min-h-0 flex-col rounded-2xl bg-gradient-to-br p-3 text-white shadow-md ${rideTone(
+        ride.status,
+      )} ${featured ? 'sm:p-3.5' : ''}`}
+    >
+      <button
+        type="button"
+        onClick={() => onSelect?.(ride)}
+        className="flex min-w-0 items-start gap-2.5 text-left"
+      >
+        <ChildAvatar child={child || { name: ride.childName }} size="sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="truncate text-sm font-bold leading-tight sm:text-[15px]">
+              {ride.childName}
+            </h3>
+            <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+              {tripStatusLabel(ride.status)}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-white/85">
+            {rideSummary(ride)}
+            {ride.time ? ` · ${ride.time}` : ''}
           </p>
-        ) : ride.status === 'open' ? (
-          <p>Looking for any available driver…</p>
-        ) : ride.status === 'pending_payment' ? (
-          <p>Complete payment to dispatch a driver for this trip.</p>
-        ) : (
-          <p>Driver: {ride.driverName || 'Waiting for driver…'}</p>
-        )}
-        <p className="flex items-center gap-2">
-          <Clock size={16} /> {ride.date} · {ride.time}
+        </div>
+      </button>
+
+      {featured && ride.pickup ? (
+        <p className="mt-2 flex items-center gap-1.5 truncate text-xs text-white/80">
+          <MapPin size={12} className="shrink-0" />
+          <span className="truncate">{ride.pickup}</span>
         </p>
-        <p className="flex items-center gap-2">
-          <MapPin size={16} /> {ride.pickup}
+      ) : null}
+
+      {showPin ? (
+        <p className="mt-2 inline-flex w-fit items-center rounded-md bg-white/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide">
+          PIN {ride.handoverPin}
         </p>
-        {ride.paymentStatus === 'paid' &&
-          ['assigned', 'in_transit'].includes(ride.status) && (
-            <p>PIN: {ride.handoverPin}</p>
-          )}
-        {showCancel && (
-          <p className="pt-1 text-xs text-white/75">
-            You can cancel this trip until a driver accepts.
-          </p>
-        )}
-      </div>
-      <div className="mt-5 flex flex-wrap gap-2">
-        {['assigned', 'in_transit'].includes(ride.status) && (
+      ) : null}
+
+      <div className="mt-auto flex flex-wrap gap-1.5 pt-2.5">
+        {trackable && (
           <Link
             to={`/live-tracking?rideId=${ride.id}`}
-            className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700"
+            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
           >
-            Track live
+            Track
           </Link>
         )}
-        {ride.driverId && ['assigned', 'in_transit'].includes(ride.status) && (
+        {ride.driverId && trackable && (
           <Link
             to={`/chat?rideId=${ride.id}`}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold"
+            className="inline-flex items-center gap-1 rounded-lg bg-white/15 px-2.5 py-1.5 text-xs font-semibold"
           >
-            <MessageSquare size={16} /> Chat
+            <MessageSquare size={12} /> Chat
           </Link>
         )}
         {ride.paymentStatus !== 'paid' && ride.status !== 'cancelled' && (
           <Link
             to={`/payment?rideId=${ride.id}`}
-            className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-amber-950"
+            className="rounded-lg bg-amber-400 px-2.5 py-1.5 text-xs font-semibold text-amber-950"
           >
-            Pay now
+            Pay
           </Link>
         )}
         {showCancel && (
@@ -244,13 +272,13 @@ function ActiveRideCard({ ride, onCancel, cancelling }) {
             type="button"
             disabled={cancelling}
             onClick={() => onCancel?.(ride)}
-            className="rounded-xl border border-white/40 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg border border-white/35 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {cancelling ? 'Cancelling…' : 'Cancel trip'}
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         )}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -454,13 +482,21 @@ export default function HomeDashboard() {
     null;
 
   const childHasActiveRide = (childId) =>
-    activeRides.some(
-      (r) =>
-        r.childId === childId ||
-        // fallback when childId missing on older payloads
-        (r.childName &&
-          children.find((c) => c.id === childId)?.name === r.childName),
+    !!rideForChild(
+      activeRides,
+      children.find((c) => c.id === childId),
     );
+
+  const focusedChildTrip = rideForChild(activeRides, selectedChild);
+
+  const selectTripOnMap = (ride) => {
+    const child = children.find(
+      (c) =>
+        (ride.childId && String(c.id) === String(ride.childId)) ||
+        (ride.childName && c.name === ride.childName),
+    );
+    if (child) setSelectedChildId(child.id);
+  };
 
   const cancelRide = async (ride) => {
     if (!ride?.id || cancellingId) return;
@@ -623,6 +659,93 @@ export default function HomeDashboard() {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-10">
         {/* Primary column */}
         <div className="space-y-8 lg:col-span-3">
+          {(activeRides.length > 0 || routePickup || routeDropoff) ? (
+          <div className="space-y-5">
+          {activeRides.length > 0 ? (
+            <section>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-lg font-bold text-slate-900">
+                  Active trips
+                  <span className="ml-2 text-sm font-semibold text-slate-400">
+                    {activeRides.length}
+                  </span>
+                </h2>
+                <p className="text-xs font-medium text-slate-500">
+                  Tap a child to focus the map
+                </p>
+              </div>
+              {cancelError && (
+                <ErrorBanner
+                  title="Couldn’t cancel trip"
+                  message={cancelError}
+                  onDismiss={() => setCancelError('')}
+                  className="mb-3"
+                />
+              )}
+              <div
+                className={
+                  activeRides.length === 1
+                    ? 'grid grid-cols-1'
+                    : 'trips-bento'
+                }
+                data-count={activeRides.length}
+              >
+                {activeRides.map((ride, index) => (
+                  <ActiveRideCard
+                    key={ride.id}
+                    ride={ride}
+                    child={childForRide(children, ride)}
+                    onCancel={cancelRide}
+                    cancelling={cancellingId === ride.id}
+                    onSelect={selectTripOnMap}
+                    featured={
+                      activeRides.length === 1 ||
+                      ([3, 5, 7].includes(activeRides.length) && index === 0)
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {(routePickup || routeDropoff || activeRides.length > 0) && (
+            <section>
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Family map</h2>
+                  <p className="mt-0.5 text-sm text-slate-500">
+                    {activeRides.length > 0
+                      ? `Tracking ${activeRides.length} active trip${
+                          activeRides.length === 1 ? '' : 's'
+                        } — tap a child to focus`
+                      : 'Preview the route for the selected child'}
+                  </p>
+                </div>
+                {focusedChildTrip && isTrackableStatus(focusedChildTrip.status) ? (
+                  <Link
+                    to={`/live-tracking?rideId=${focusedChildTrip.id}`}
+                    className="text-sm font-semibold text-emerald-700 hover:underline"
+                  >
+                    Open live tracking
+                  </Link>
+                ) : null}
+              </div>
+              <TripRouteMap
+                pickup={routePickup}
+                dropoff={routeDropoff}
+                trips={activeRides}
+                children={children}
+                focusChildId={selectedChildId}
+                onSelectTrip={selectTripOnMap}
+                className={
+                  activeRides.length > 0 ? 'h-64 sm:h-80' : 'h-48 sm:h-56'
+                }
+              />
+            </section>
+          )}
+          </div>
+          ) : null}
+
           {/* Instant ride */}
           <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 p-5 text-white shadow-lg sm:p-6">
             <div className="flex items-start justify-between gap-3">
@@ -788,16 +911,6 @@ export default function HomeDashboard() {
                   )}
               </div>
             </div>
-
-            {(routePickup || routeDropoff) && (
-              <div className="mt-4 overflow-hidden rounded-2xl">
-                <TripRouteMap
-                  pickup={routePickup}
-                  dropoff={routeDropoff}
-                  className="h-40"
-                />
-              </div>
-            )}
 
             {(fareLoading || fareQuote || schoolDestError) && (
               <div className="mt-3 rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-200">
@@ -1003,37 +1116,6 @@ export default function HomeDashboard() {
             </Link>
           </div>
 
-          {activeRides.length > 0 ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-xl font-bold text-slate-900">
-                  Active trips
-                  <span className="ml-2 text-base font-semibold text-slate-400">
-                    ({activeRides.length})
-                  </span>
-                </h2>
-                <p className="text-xs font-medium text-slate-500">
-                  Book more anytime
-                </p>
-              </div>
-              {cancelError && (
-                <ErrorBanner
-                  title="Couldn’t cancel trip"
-                  message={cancelError}
-                  onDismiss={() => setCancelError('')}
-                />
-              )}
-              {activeRides.map((ride) => (
-                <ActiveRideCard
-                  key={ride.id}
-                  ride={ride}
-                  onCancel={cancelRide}
-                  cancelling={cancellingId === ride.id}
-                />
-              ))}
-            </div>
-          ) : null}
-
           {/* Active drivers */}
           <div>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -1144,30 +1226,66 @@ export default function HomeDashboard() {
               </Link>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              {children.map((child) => (
-                <div
-                  key={child.id}
-                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <ChildAvatar child={child} size="lg" />
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-slate-900">
-                      {child.name}
-                    </h3>
-                    <p className="truncate text-sm text-slate-600">
-                      {child.school} · {child.grade}
-                    </p>
-                  </div>
-                  <Link
-                    to={`/add-child?id=${child.id}`}
-                    className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-500 hover:text-emerald-700"
-                    title="Edit profile / photo"
+              {children.map((child) => {
+                const trip = rideForChild(activeRides, child);
+                const selected = selectedChildId === child.id;
+                return (
+                  <div
+                    key={child.id}
+                    className={`flex items-center gap-3 rounded-2xl border bg-white p-4 shadow-sm ${
+                      selected
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/15'
+                        : 'border-slate-200'
+                    }`}
                   >
-                    <Camera size={14} />
-                    {child.photoUrl ? 'Edit' : 'Photo'}
-                  </Link>
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedChildId(child.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <ChildAvatar child={child} size="lg" />
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-slate-900">
+                          {child.name}
+                        </h3>
+                        <p className="truncate text-sm text-slate-600">
+                          {child.school} · {child.grade}
+                        </p>
+                        {trip ? (
+                          <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                trip.status === 'in_transit'
+                                  ? 'bg-emerald-500'
+                                  : 'bg-amber-400'
+                              }`}
+                            />
+                            {tripStatusLabel(trip.status)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </button>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      {trip && isTrackableStatus(trip.status) ? (
+                        <Link
+                          to={`/live-tracking?rideId=${trip.id}`}
+                          className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                        >
+                          Track
+                        </Link>
+                      ) : null}
+                      <Link
+                        to={`/add-child?id=${child.id}`}
+                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-500 hover:text-emerald-700"
+                        title="Edit profile / photo"
+                      >
+                        <Camera size={14} />
+                        {child.photoUrl ? 'Edit' : 'Photo'}
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
               {children.length === 0 && (
                 <p className="text-sm text-slate-500">
                   No children yet — add one or more to book rides.
