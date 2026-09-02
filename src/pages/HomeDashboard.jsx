@@ -17,12 +17,12 @@ import {
   Navigation,
   School,
   Map,
+  ArrowUpDown,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
 import {
-  resolveDestination,
-  resolvePickup,
+  resolvePlace,
   captureParentLocationForBooking,
   formatDistanceKm,
   formatEtaMinutes,
@@ -31,7 +31,7 @@ import {
   DEFAULT_HOME,
 } from '../lib/geo';
 import { quoteTripFare } from '../lib/pricing';
-import { tripTypeFromModes } from '../lib/trip';
+import { tripTypeFromModes, tripTypeHint } from '../lib/trip';
 import {
   childForRide,
   isTrackableStatus,
@@ -294,8 +294,10 @@ export default function HomeDashboard() {
   const [selectedDriverId, setSelectedDriverId] = useState(null);
   /** choose = pick a driver · nearest = auto-assign closest free driver */
   const [assignMode, setAssignMode] = useState('nearest');
-  const [pickupMode, setPickupMode] = useState('home'); // home | current
-  const [dropoffMode, setDropoffMode] = useState('school'); // school | custom
+  const [pickupMode, setPickupMode] = useState('home'); // home | current | school | custom
+  const [dropoffMode, setDropoffMode] = useState('school'); // school | home | custom | current
+  const [customPickup, setCustomPickup] = useState('');
+  const [customPickupPlace, setCustomPickupPlace] = useState(null);
   const [customDropoff, setCustomDropoff] = useState('');
   const [customDropoffPlace, setCustomDropoffPlace] = useState(null);
   const [routePickup, setRoutePickup] = useState(null);
@@ -343,19 +345,48 @@ export default function HomeDashboard() {
     children.find((c) => c.id === selectedChildId) || children[0] || null;
   const selectedSchoolLabel = schoolLabelFromChild(selectedChild);
   const selectedChildHasSchool = childHasSchool(selectedChild);
+  const usesSchool =
+    pickupMode === 'school' || dropoffMode === 'school';
+  const tripDirection = tripTypeHint(
+    tripTypeFromModes(pickupMode, dropoffMode),
+  );
+
+  const placeArgsFor = (child) => ({
+    child,
+    homeAddress: user?.homeAddress || DEFAULT_HOME.label,
+    homeCoords: user?.homeCoords,
+    schoolName: child?.school,
+    schoolAddress: child?.schoolAddress || child?.school,
+    schoolCoords: child?.schoolCoords,
+  });
+
+  const swapPickupAndDestination = () => {
+    setPickupMode(dropoffMode);
+    setDropoffMode(pickupMode);
+    setCustomPickup(customDropoff);
+    setCustomDropoff(customPickup);
+    setCustomPickupPlace(customDropoffPlace);
+    setCustomDropoffPlace(customPickupPlace);
+    setRoutePickup(routeDropoff);
+    setRouteDropoff(routePickup);
+  };
 
   // Rank free drivers by distance to pickup whenever locations change
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (dropoffMode === 'custom' && !customDropoffPlace) {
+      if (pickupMode === 'custom' && !customPickupPlace) {
+        return;
+      }
+      if (pickupMode === 'school' && !childHasSchool(selectedChild)) {
         return;
       }
       try {
-        const from = await resolvePickup({
-          mode: pickupMode === 'current' ? 'current' : 'home',
-          homeAddress: user?.homeAddress || DEFAULT_HOME.label,
-          homeCoords: user?.homeCoords,
+        const from = await resolvePlace({
+          mode: pickupMode,
+          ...placeArgsFor(selectedChild),
+          customLabel: customPickup.trim() || customPickupPlace?.label,
+          customCoords: customPickupPlace,
         });
         if (cancelled) return;
         driversApi
@@ -381,16 +412,18 @@ export default function HomeDashboard() {
     return () => {
       cancelled = true;
     };
+    // placeArgsFor is inline; depend on the fields it reads
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pickupMode,
-    dropoffMode,
-    customDropoffPlace,
+    selectedChild,
+    customPickupPlace,
+    customPickup,
     user?.homeAddress,
     user?.homeCoords,
   ]);
 
-  // Resolve school (or custom) destination from the selected child, then
-  // draw the route and preview fare from pickup → destination.
+  // Resolve pickup and destination, then draw the route and preview fare.
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
@@ -401,13 +434,23 @@ export default function HomeDashboard() {
         setSchoolDestError('');
         return;
       }
-      if (dropoffMode === 'school' && !childHasSchool(selectedChild)) {
+      if (usesSchool && !childHasSchool(selectedChild)) {
         setRoutePickup(null);
         setRouteDropoff(null);
         setFareQuote(null);
         setSchoolDestError(
           'This child has no school yet. Add a school address on the child profile.',
         );
+        return;
+      }
+      if (
+        pickupMode === 'custom' &&
+        !customPickupPlace &&
+        !customPickup.trim()
+      ) {
+        setRoutePickup(null);
+        setFareQuote(null);
+        setSchoolDestError('');
         return;
       }
       if (
@@ -424,18 +467,17 @@ export default function HomeDashboard() {
       setSchoolDestError('');
       setFareLoading(true);
       try {
-        const from = await resolvePickup({
-          mode: pickupMode === 'current' ? 'current' : 'home',
-          homeAddress: user?.homeAddress || DEFAULT_HOME.label,
-          homeCoords: user?.homeCoords,
+        const args = placeArgsFor(selectedChild);
+        const from = await resolvePlace({
+          mode: pickupMode,
+          ...args,
+          customLabel: customPickup.trim() || customPickupPlace?.label,
+          customCoords: customPickupPlace,
         });
-        const to = await resolveDestination({
-          mode: dropoffMode === 'custom' ? 'custom' : 'school',
-          child: selectedChild,
-          schoolName: selectedChild.school,
-          schoolAddress: selectedChild.schoolAddress || selectedChild.school,
-          schoolCoords: selectedChild.schoolCoords,
-          customLabel: customDropoff.trim(),
+        const to = await resolvePlace({
+          mode: dropoffMode,
+          ...args,
+          customLabel: customDropoff.trim() || customDropoffPlace?.label,
           customCoords: customDropoffPlace,
         });
         if (cancelled) return;
@@ -450,9 +492,9 @@ export default function HomeDashboard() {
           setFareQuote(null);
           setSchoolDestError(
             err.message ||
-              (dropoffMode === 'school'
+              (usesSchool
                 ? 'Could not place this school on the map.'
-                : 'Could not resolve destination.'),
+                : 'Could not resolve locations.'),
           );
         }
       } finally {
@@ -463,10 +505,13 @@ export default function HomeDashboard() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedChild,
     pickupMode,
     dropoffMode,
+    customPickupPlace,
+    customPickup,
     customDropoffPlace,
     customDropoff,
     user?.homeAddress,
@@ -548,11 +593,18 @@ export default function HomeDashboard() {
       return;
     }
 
-    if (dropoffMode === 'custom' && !customDropoff.trim()) {
-      setInstantError('Enter a destination address, or choose School.');
+    if (pickupMode === 'custom' && !customPickup.trim() && !customPickupPlace) {
+      setInstantError('Enter a pickup address, or choose Home / School.');
       return;
     }
-    if (dropoffMode === 'school' && !childHasSchool(child)) {
+    if (dropoffMode === 'custom' && !customDropoff.trim() && !customDropoffPlace) {
+      setInstantError('Enter a destination address, or choose School / Home.');
+      return;
+    }
+    if (
+      (pickupMode === 'school' || dropoffMode === 'school') &&
+      !childHasSchool(child)
+    ) {
       setInstantError(
         'This child has no school address. Add a school on the child profile, or search a destination.',
       );
@@ -562,19 +614,19 @@ export default function HomeDashboard() {
     setInstantLoading(true);
     try {
       const parentLocation = await captureParentLocationForBooking();
+      const args = placeArgsFor(child);
 
-      const from = await resolvePickup({
-        mode: pickupMode === 'current' ? 'current' : 'home',
+      const from = await resolvePlace({
+        mode: pickupMode,
+        ...args,
         homeAddress: user?.homeAddress || `Home · pickup for ${child.name}`,
-        homeCoords: user?.homeCoords,
+        customLabel: customPickup.trim() || customPickupPlace?.label,
+        customCoords: customPickupPlace,
       });
-      const to = await resolveDestination({
-        mode: dropoffMode === 'custom' ? 'custom' : 'school',
-        child,
-        schoolName: child.school || school,
-        schoolAddress: child.schoolAddress || child.school,
-        schoolCoords: child.schoolCoords,
-        customLabel: customDropoff.trim(),
+      const to = await resolvePlace({
+        mode: dropoffMode,
+        ...args,
+        customLabel: customDropoff.trim() || customDropoffPlace?.label,
         customCoords: customDropoffPlace,
       });
 
@@ -592,10 +644,7 @@ export default function HomeDashboard() {
             ? selectedDriver.id
             : undefined,
         instant: true,
-        tripType: tripTypeFromModes(
-          pickupMode,
-          dropoffMode === 'school' ? 'school' : 'custom',
-        ),
+        tripType: tripTypeFromModes(pickupMode, dropoffMode),
         pickup: from.label,
         dropoff: to.label,
         pickupCoords: { lng: from.lng, lat: from.lat },
@@ -806,10 +855,28 @@ export default function HomeDashboard() {
 
             <div className="mt-4 space-y-3">
               <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
-                  Pickup location
-                </p>
-                <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                    Pickup location
+                  </p>
+                  <span className="truncate text-[11px] font-medium text-emerald-200/80">
+                    {tripDirection}
+                  </span>
+                </div>
+                
+                
+                 {/* Pickup options */}
+                <div className="flex justify-left mb-3">
+                <button
+                  type="button"
+                  onClick={swapPickupAndDestination}
+                  aria-label="Swap pickup and destination"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/25"
+                >
+                  <ArrowUpDown size={14} /> Swap pickup & destination
+                </button>
+              </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() => setPickupMode('home')}
@@ -830,15 +897,61 @@ export default function HomeDashboard() {
                         : 'bg-white/10 text-white hover:bg-white/15'
                     }`}
                   >
-                    <Navigation size={16} /> Current location
+                    <Navigation size={16} /> Current
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPickupMode('school')}
+                    className={`col-span-2 flex items-start gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition sm:col-span-1 ${
+                      pickupMode === 'school'
+                        ? 'bg-white font-semibold text-slate-900'
+                        : 'bg-white/10 text-white hover:bg-white/15'
+                    }`}
+                  >
+                    <School size={16} className="mt-0.5 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block">School</span>
+                      <span
+                        className={`mt-0.5 block truncate text-[11px] font-normal ${
+                          pickupMode === 'school'
+                            ? 'text-slate-500'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {selectedSchoolLabel || 'Child’s school'}
+                      </span>
+                    </span>
                   </button>
                 </div>
+                {pickupMode === 'custom' && (
+                  <div className="mt-2">
+                    <AddressSearchInput
+                      dark
+                      value={customPickup}
+                      onChange={(v) => {
+                        setCustomPickup(v);
+                        setCustomPickupPlace(null);
+                      }}
+                      onSelect={(place) => {
+                        setCustomPickup(place.label);
+                        setCustomPickupPlace({
+                          label: place.label,
+                          lng: place.lng,
+                          lat: place.lat,
+                        });
+                      }}
+                      placeholder="Search pickup address…"
+                    />
+                  </div>
+                )}
               </div>
+
+
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
                   Destination
                 </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() => setDropoffMode('school')}
@@ -865,8 +978,19 @@ export default function HomeDashboard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDropoffMode('custom')}
+                    onClick={() => setDropoffMode('home')}
                     className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                      dropoffMode === 'home'
+                        ? 'bg-white font-semibold text-slate-900'
+                        : 'bg-white/10 text-white hover:bg-white/15'
+                    }`}
+                  >
+                    <Home size={16} /> Home
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDropoffMode('custom')}
+                    className={`col-span-2 flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition sm:col-span-1 ${
                       dropoffMode === 'custom'
                         ? 'bg-white font-semibold text-slate-900'
                         : 'bg-white/10 text-white hover:bg-white/15'
@@ -874,6 +998,15 @@ export default function HomeDashboard() {
                   >
                     <Map size={16} /> Desired place
                   </button>
+                  {dropoffMode === 'current' && (
+                    <button
+                      type="button"
+                      onClick={() => setDropoffMode('current')}
+                      className="col-span-2 flex items-center gap-2 rounded-xl bg-white px-3 py-2.5 text-left text-sm font-semibold text-slate-900 sm:col-span-3"
+                    >
+                      <Navigation size={16} /> Current location
+                    </button>
+                  )}
                 </div>
                 {dropoffMode === 'custom' && (
                   <div className="mt-2">
@@ -896,7 +1029,7 @@ export default function HomeDashboard() {
                     />
                   </div>
                 )}
-                {dropoffMode === 'school' &&
+                {usesSchool &&
                   selectedChild &&
                   !selectedChildHasSchool && (
                     <p className="mt-2 text-xs text-amber-200">
@@ -1078,7 +1211,13 @@ export default function HomeDashboard() {
               disabled={
                 instantLoading ||
                 children.length === 0 ||
-                (dropoffMode === 'school' && !selectedChildHasSchool) ||
+                (usesSchool && !selectedChildHasSchool) ||
+                (pickupMode === 'custom' &&
+                  !customPickupPlace &&
+                  !customPickup.trim()) ||
+                (dropoffMode === 'custom' &&
+                  !customDropoffPlace &&
+                  !customDropoff.trim()) ||
                 (assignMode === 'choose' && availableDrivers.length === 0)
               }
               className="mt-5 w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1087,7 +1226,7 @@ export default function HomeDashboard() {
                 ? 'Creating ride…'
                 : children.length === 0
                   ? 'Add a child to book'
-                  : dropoffMode === 'school' && !selectedChildHasSchool
+                  : usesSchool && !selectedChildHasSchool
                     ? 'Add a school to book'
                     : assignMode === 'choose' && availableDrivers.length === 0
                     ? 'No drivers available'

@@ -92,3 +92,23 @@ export function swapPlaces(pickupPlace, dropoffPlace) {
     dropoffPlace: pickupPlace || null,
   };
 }
+
+/**
+ * Reverse a booking draft so pickup and destination trade places
+ * (home → school becomes school → home, and the reverse).
+ */
+export function swapBookingLocations(draft = {}) {
+  const pickupMode = draft.dropoffMode || 'school';
+  const dropoffMode = draft.pickupMode || 'home';
+  return {
+    pickup: draft.dropoff,
+    dropoff: draft.pickup,
+    pickupCoords: draft.dropoffCoords || null,
+    dropoffCoords: draft.pickupCoords || null,
+    pickupMode,
+    dropoffMode,
+    customPickup: draft.customDropoff || '',
+    customDropoff: draft.customPickup || '',
+    tripType: tripTypeFromModes(pickupMode, dropoffMode),
+  };
+}

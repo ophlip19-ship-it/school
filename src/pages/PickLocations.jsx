@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Home, Navigation, School, Map } from 'lucide-react';
+import { MapPin, Home, Navigation, School, Map, ArrowUpDown } from 'lucide-react';
 import { getBookingDraft, setBookingDraft } from '../lib/booking';
 import { useAuth } from '../context/AuthContext';
 import { formatMoney } from '../lib/api';
@@ -25,6 +25,8 @@ import { quoteTripFare } from '../lib/pricing';
 import {
   modesForTripType,
   tripTypeFromModes,
+  tripTypeHint,
+  swapPlaces,
 } from '../lib/trip';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
 import MapBottomDrawer from '../components/MapBottomDrawer';
@@ -352,6 +354,18 @@ export default function PickLocations() {
     };
   }, [mapReady, pickupPlace, dropoffPlace]);
 
+  const swapPickupAndDestination = () => {
+    const swapped = swapPlaces(pickupPlace, dropoffPlace);
+    setPickupPlace(swapped.pickupPlace);
+    setDropoffPlace(swapped.dropoffPlace);
+    setPickupMode(dropoffMode);
+    setDropoffMode(pickupMode);
+    setCustomPickup(customDropoff);
+    setCustomDropoff(customPickup);
+    setActiveField((field) => (field === 'pickup' ? 'dropoff' : 'pickup'));
+    setError('');
+  };
+
   const confirm = async () => {
     setError('');
     setLoading(true);
@@ -525,8 +539,13 @@ export default function PickLocations() {
 
         {/* Pickup */}
         <div>
-          <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <MapPin size={16} className="text-emerald-600" /> Pickup for driver
+          <label className="mb-2 flex items-center justify-between gap-2 text-sm font-semibold text-slate-800">
+            <span className="inline-flex items-center gap-2">
+              <MapPin size={16} className="text-emerald-600" /> Pickup for driver
+            </span>
+            <span className="text-[11px] font-medium text-slate-500">
+              {tripTypeHint(tripTypeFromModes(pickupMode, dropoffMode))}
+            </span>
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -561,21 +580,67 @@ export default function PickLocations() {
               <span className="text-sm font-semibold text-slate-900">Current location</span>
               <span className="text-[11px] text-slate-500">Use phone GPS</span>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveField('pickup');
+                setPickupMode('school');
+              }}
+              className={`flex flex-col items-start gap-1 rounded-2xl border px-3 py-3 text-left transition ${
+                pickupMode === 'school'
+                  ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20'
+                  : 'border-slate-200 bg-white hover:border-emerald-300'
+              }`}
+            >
+              <School size={18} className="text-emerald-700" />
+              <span className="text-sm font-semibold text-slate-900">School</span>
+              <span className="line-clamp-2 text-[11px] text-slate-500">
+                {school ||
+                  (selectedChild
+                    ? `No school for ${selectedChild.name}`
+                    : 'Add a school on the child profile')}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveField('pickup');
+                setPickupMode('custom');
+              }}
+              className={`flex flex-col items-start gap-1 rounded-2xl border px-3 py-3 text-left transition ${
+                pickupMode === 'custom'
+                  ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20'
+                  : 'border-slate-200 bg-white hover:border-emerald-300'
+              }`}
+            >
+              <Map size={18} className="text-slate-600" />
+              <span className="text-sm font-semibold text-slate-900">Search / pin</span>
+              <span className="text-[11px] text-slate-500">Map or address book</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveField('pickup');
-              setPickupMode('custom');
-            }}
-            className={`mt-2 w-full rounded-2xl border px-3 py-2 text-left text-sm ${
-              pickupMode === 'custom'
-                ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-900'
-                : 'border-slate-200 text-slate-600'
-            }`}
-          >
-            Search / map pin for pickup
-          </button>
+          {pickupMode === 'custom' && (
+            <div className="mt-3">
+              <AddressSearchInput
+                value={customPickup}
+                onChange={(v) => {
+                  setCustomPickup(v);
+                  setActiveField('pickup');
+                }}
+                onSelect={({ label, lng, lat }) => {
+                  setPickupMode('custom');
+                  setActiveField('pickup');
+                  setCustomPickup(label);
+                  setPickupPlace({ label, lng, lat });
+                  map.current?.easeTo({
+                    center: [lng, lat],
+                    zoom: 14,
+                    duration: 500,
+                  });
+                }}
+                placeholder="Search pickup address…"
+              />
+            </div>
+          )}
           {pickupPlace && (
             <p className="mt-2 truncate rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
               ✓ {pickupPlace.label}
@@ -583,8 +648,19 @@ export default function PickLocations() {
           )}
         </div>
 
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={swapPickupAndDestination}
+            aria-label="Swap pickup and destination"
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
+          >
+            <ArrowUpDown size={14} /> Swap pickup & destination
+          </button>
+        </div>
+
         {/* Destination */}
-        <div className="mt-6">
+        <div className="mt-4">
           <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
             <MapPin size={16} className="text-blue-600" /> Destination
           </label>
@@ -614,9 +690,25 @@ export default function PickLocations() {
               type="button"
               onClick={() => {
                 setActiveField('dropoff');
-                setDropoffMode('custom');
+                setDropoffMode('home');
               }}
               className={`flex flex-col items-start gap-1 rounded-2xl border px-3 py-3 text-left transition ${
+                dropoffMode === 'home'
+                  ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20'
+                  : 'border-slate-200 bg-white hover:border-blue-300'
+              }`}
+            >
+              <Home size={18} className="text-blue-600" />
+              <span className="text-sm font-semibold text-slate-900">Home</span>
+              <span className="line-clamp-2 text-[11px] text-slate-500">{homeAddress}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveField('dropoff');
+                setDropoffMode('custom');
+              }}
+              className={`col-span-2 flex flex-col items-start gap-1 rounded-2xl border px-3 py-3 text-left transition ${
                 dropoffMode === 'custom'
                   ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20'
                   : 'border-slate-200 bg-white hover:border-blue-300'
@@ -626,6 +718,20 @@ export default function PickLocations() {
               <span className="text-sm font-semibold text-slate-900">Desired location</span>
               <span className="text-[11px] text-slate-500">Search address book</span>
             </button>
+            {dropoffMode === 'current' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveField('dropoff');
+                  setDropoffMode('current');
+                }}
+                className="col-span-2 flex flex-col items-start gap-1 rounded-2xl border border-blue-500 bg-blue-50 px-3 py-3 text-left ring-2 ring-blue-500/20"
+              >
+                <Navigation size={18} className="text-blue-600" />
+                <span className="text-sm font-semibold text-slate-900">Current location</span>
+                <span className="text-[11px] text-slate-500">Drop off at your GPS</span>
+              </button>
+            )}
           </div>
 
           {dropoffMode === 'custom' && (
@@ -657,7 +763,7 @@ export default function PickLocations() {
               ✓ {dropoffPlace.label}
             </p>
           )}
-          {dropoffMode === 'school' &&
+          {(pickupMode === 'school' || dropoffMode === 'school') &&
             selectedChild &&
             !childHasSchool(selectedChild) && (
               <p className="mt-2 text-xs text-amber-800">
@@ -668,7 +774,7 @@ export default function PickLocations() {
                 >
                   {selectedChild.name}&apos;s profile
                 </Link>{' '}
-                to route to school.
+                to use school as pickup or destination.
               </p>
             )}
         </div>
@@ -697,7 +803,7 @@ export default function PickLocations() {
             loading ||
             !pickupPlace ||
             !dropoffPlace ||
-            (dropoffMode === 'school' &&
+            ((pickupMode === 'school' || dropoffMode === 'school') &&
               selectedChild &&
               !childHasSchool(selectedChild)) ||
             (pickupMode === 'custom' && !pickupPlace) ||
