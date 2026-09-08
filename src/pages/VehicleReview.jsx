@@ -43,8 +43,15 @@ export default function VehicleReview() {
   });
   const availableCount = drivers.filter((d) => d.available).length;
 
+  const slots =
+    Array.isArray(draft.slots) && draft.slots.length
+      ? draft.slots
+      : draft.date && draft.time
+        ? [{ date: draft.date, time: draft.time }]
+        : [];
+
   const handleConfirm = async () => {
-    if (!draft.childId || !draft.pickup || !draft.dropoff || !draft.date || !draft.time) {
+    if (!draft.childId || !draft.pickup || !draft.dropoff || slots.length === 0) {
       setError('Booking incomplete. Please start from Select children.');
       return;
     }
@@ -59,23 +66,42 @@ export default function VehicleReview() {
         driverId: selectedDriver.id,
         driverName: selectedDriver.name,
       });
-      // Share parent GPS with the driver when the ride is booked
       const parentLocation =
         draft.parentLocation || (await captureParentLocationForBooking());
-      const { ride } = await ridesApi.create({
-        childId: draft.childId,
-        driverId: selectedDriver.id,
-        pickup: draft.pickup,
-        dropoff: draft.dropoff,
-        pickupCoords: draft.pickupCoords || null,
-        dropoffCoords: draft.dropoffCoords || null,
-        parentLocation: parentLocation || undefined,
-        date: draft.date,
-        time: draft.time,
-        tripType: draft.tripType || 'pickup',
-      });
+      const created = [];
+      const failures = [];
+      for (const slot of slots) {
+        try {
+          const { ride } = await ridesApi.create({
+            childId: draft.childId,
+            driverId: selectedDriver.id,
+            assignMode: 'choose',
+            instant: false,
+            pickup: draft.pickup,
+            dropoff: draft.dropoff,
+            pickupCoords: draft.pickupCoords || null,
+            dropoffCoords: draft.dropoffCoords || null,
+            parentLocation: parentLocation || undefined,
+            date: slot.date,
+            time: slot.time,
+            tripType: draft.tripType || 'pickup',
+            recurring: draft.recurring || [],
+            distanceKm: draft.distanceKm ?? undefined,
+          });
+          created.push(ride);
+        } catch (err) {
+          failures.push(
+            `${slot.date} ${slot.time}: ${err.message || 'Could not create'}`,
+          );
+        }
+      }
+      if (!created.length) {
+        setError(failures[0] || 'Failed to create scheduled rides');
+        return;
+      }
       clearBookingDraft();
-      navigate(`/payment?rideId=${ride.id}`);
+      const unpaid = created.find((r) => r.paymentStatus !== 'paid') || created[0];
+      navigate(`/payment?rideId=${unpaid.id}`);
     } catch (err) {
       setError(err.message || 'Failed to create ride');
     } finally {
@@ -209,12 +235,25 @@ export default function VehicleReview() {
               {draft.dropoff || '—'}
             </span>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-3">
             <span className="text-slate-500">When</span>
-            <span className="font-medium text-slate-900">
-              {draft.date || '—'} · {draft.time || '—'}
+            <span className="max-w-[70%] text-right font-medium text-slate-900">
+              {slots.length > 1
+                ? `${slots.length} scheduled rides`
+                : slots[0]
+                  ? `${slots[0].date} · ${slots[0].time}`
+                  : '—'}
             </span>
           </div>
+          {slots.length > 1 && (
+            <ul className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              {slots.map((s) => (
+                <li key={`${s.date}-${s.time}`}>
+                  {s.date} · {s.time}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
@@ -227,9 +266,13 @@ export default function VehicleReview() {
         className="mt-8 w-full rounded-2xl bg-emerald-600 py-4 font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-60"
       >
         {loading
-          ? 'Creating ride…'
+          ? slots.length > 1
+            ? `Creating ${slots.length} rides…`
+            : 'Creating ride…'
           : selectedDriver
-            ? `Continue with ${selectedDriver.name}`
+            ? slots.length > 1
+              ? `Continue · ${slots.length} rides`
+              : `Continue with ${selectedDriver.name}`
             : 'Select a driver to continue'}
       </button>
     </div>

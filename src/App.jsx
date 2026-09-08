@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import RideReminders from './components/RideReminders';
 
 const NAV_HIDDEN = new Set([
   '/',
@@ -295,6 +296,7 @@ function App() {
     <AuthProvider>
       <Router>
         <AppRoutes />
+        <RideReminders />
         <Navbar />
       </Router>
     </AuthProvider>

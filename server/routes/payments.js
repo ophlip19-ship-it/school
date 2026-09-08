@@ -108,17 +108,26 @@ async function markRidePaid(rideId, userId, amountCents, provider, providerRef) 
   });
 
   const existing = await Ride.findById(rideId).select(
-    'driverId assignMode pickupCoords',
+    'driverId assignMode pickupCoords instant',
   );
-  const assignment = existing
-    ? await resolvePostPaymentAssignment(existing)
-    : { driverId: null, status: 'open', assignMode: 'pool' };
+
+  // Instant rides dispatch now. Scheduled rides wait until their calendar time.
+  let next = {
+    driverId: existing?.driverId || null,
+    status: 'scheduled',
+    assignMode: existing?.assignMode || 'pool',
+  };
+  if (!existing || existing.instant) {
+    next = existing
+      ? await resolvePostPaymentAssignment(existing)
+      : { driverId: null, status: 'open', assignMode: 'pool' };
+  }
 
   await Ride.findByIdAndUpdate(rideId, {
     paymentStatus: 'paid',
-    status: assignment.status,
-    driverId: assignment.driverId,
-    assignMode: assignment.assignMode,
+    status: next.status,
+    driverId: next.driverId,
+    assignMode: next.assignMode,
     ...(provider === 'stripe' && providerRef
       ? { stripePaymentIntentId: providerRef }
       : {}),

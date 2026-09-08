@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
+import { CalendarPlus } from 'lucide-react';
 import { formatMoney } from '../lib/api';
+import { downloadRideIcs, googleCalendarUrl } from '../lib/schedule';
 
 export default function RideDetails() {
   const { state: ride } = useLocation();
@@ -49,7 +51,26 @@ export default function RideDetails() {
       </div>
 
       <div className="mt-6 grid gap-3">
-        {ride.paymentStatus === 'paid' && (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => downloadRideIcs(ride)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-800"
+          >
+            <CalendarPlus size={16} /> Save .ics
+          </button>
+          <a
+            href={googleCalendarUrl(ride)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-800"
+          >
+            Google Calendar
+          </a>
+        </div>
+        {ride.paymentStatus === 'paid' &&
+          ride.status !== 'scheduled' &&
+          ride.status !== 'pending_payment' && (
           <>
             <Link
               to={`/live-tracking?rideId=${ride.id}`}

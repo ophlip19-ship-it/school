@@ -69,6 +69,12 @@ const rideSchema = new mongoose.Schema(
     rideDate: { type: String, required: true },
     rideTime: { type: String, required: true },
     tripType: { type: String, default: 'pickup' },
+    /** True when booked as “need a driver now” (one live trip per child). */
+    instant: { type: Boolean, default: false, index: true },
+    /** Weekdays used when the parent created a repeating schedule. */
+    recurring: { type: [String], default: [] },
+    /** When a 30-minute reminder was last sent to the parent. */
+    remindedAt: { type: Date, default: null },
     status: {
       type: String,
       default: 'pending_payment',

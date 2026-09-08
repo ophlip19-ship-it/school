@@ -44,7 +44,8 @@ export default function SelectChildren() {
       </Link>
       <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">Select children</h1>
       <p className="mt-2 text-slate-600">
-        Who is riding today? You can manage multiple children on your account.
+        Who is riding? Each child can have one live trip at a time, and you can
+        schedule several later rides.
       </p>
 
       {loading && <p className="mt-8 text-slate-500">Loading…</p>}

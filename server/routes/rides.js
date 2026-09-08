@@ -15,6 +15,7 @@ import {
   pickNearestDriver,
   pricingDefaults,
 } from '../utils/pricing.js';
+import { LIVE_TRIP_STATUSES } from '../utils/rideTime.js';
 
 const router = Router();
 
@@ -129,6 +130,7 @@ router.get('/active', requireAuth, async (req, res) => {
         status: {
           $in: [
             'pending_payment',
+            'scheduled',
             'open',
             'requested',
             'assigned',
@@ -140,10 +142,20 @@ router.get('/active', requireAuth, async (req, res) => {
         .populate('parentId', 'name phone')
         .populate('driverId', 'name phone vehiclePlate');
 
-      const rides = list.map((r) => mapRideForViewer(r, req.user));
+      const mapped = list.map((r) => mapRideForViewer(r, req.user));
+      const isLive = (r) =>
+        LIVE_TRIP_STATUSES.includes(r.status) ||
+        (r.status === 'pending_payment' && r.instant);
+      const rides = mapped.filter(isLive);
+      const scheduled = mapped.filter(
+        (r) =>
+          r.status === 'scheduled' ||
+          (r.status === 'pending_payment' && !r.instant),
+      );
       return res.json({
         rides,
-        // Backward-compatible single ride (most recently updated)
+        scheduled,
+        // Backward-compatible single ride (most recently updated live trip)
         ride: rides[0] || null,
       });
     }
@@ -253,6 +265,7 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       distanceKm = null,
       instant = false,
       driverId = null,
+      recurring = [],
       /** choose | nearest | pool — parent choice vs auto nearest vs open pool */
       assignMode: rawAssignMode = null,
     } = req.body || {};
@@ -266,6 +279,8 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       parentId: req.user.id,
     });
     if (!child) return res.status(400).json({ error: 'Invalid child' });
+
+    const isInstant = instant === true;
 
     // Resolve assignment mode
     let assignMode = String(rawAssignMode || '').toLowerCase();
@@ -288,6 +303,35 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const rideTime =
       time || `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    // One live trip per child. Scheduled (future) rides may stack at different times.
+    if (isInstant) {
+      const liveCount = await Ride.countDocuments({
+        childId: child._id,
+        $or: [
+          { status: { $in: LIVE_TRIP_STATUSES } },
+          { instant: true, status: 'pending_payment' },
+        ],
+      });
+      if (liveCount > 0) {
+        return res.status(409).json({
+          error:
+            `${child.name} already has an active trip. Wait until it finishes, or schedule another ride for a later time.`,
+        });
+      }
+    } else {
+      const clash = await Ride.findOne({
+        childId: child._id,
+        rideDate,
+        rideTime,
+        status: { $nin: ['cancelled', 'completed'] },
+      }).select('_id');
+      if (clash) {
+        return res.status(409).json({
+          error: `${child.name} already has a ride at ${rideDate} ${rideTime}. Pick a different time.`,
+        });
+      }
+    }
 
     let ridePickup = pickup;
     let rideDropoff = dropoff;
@@ -440,7 +484,11 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       trail: [],
       rideDate,
       rideTime,
-      tripType: instant ? tripType || 'pickup' : tripType,
+      tripType: isInstant ? tripType || 'pickup' : tripType,
+      instant: isInstant,
+      recurring: Array.isArray(recurring)
+        ? recurring.map((d) => String(d)).filter(Boolean).slice(0, 7)
+        : [],
       status: 'pending_payment',
       fareCents: fare.fareCents,
       distanceKm: fare.distanceKm,
@@ -671,7 +719,12 @@ router.get('/:id/location', requireAuth, async (req, res) => {
 });
 
 /** Statuses where the parent may cancel before a driver has accepted */
-const PARENT_CANCELLABLE = ['pending_payment', 'open', 'requested'];
+const PARENT_CANCELLABLE = [
+  'pending_payment',
+  'scheduled',
+  'open',
+  'requested',
+];
 
 /**
  * Parent cancels a trip before any driver accepts.

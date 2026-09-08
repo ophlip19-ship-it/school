@@ -32,9 +32,38 @@ export function tripStatusLabel(status) {
       return 'Completed';
     case 'cancelled':
       return 'Cancelled';
+    case 'scheduled':
+      return 'Scheduled';
     default:
       return String(status || 'active').replace(/_/g, ' ');
   }
+}
+
+/** Live / in-progress trip (blocks another instant booking for that child). */
+export function isLiveTrip(ride) {
+  if (!ride) return false;
+  if (['open', 'requested', 'assigned', 'in_transit'].includes(ride.status)) {
+    return true;
+  }
+  return ride.status === 'pending_payment' && ride.instant === true;
+}
+
+export function isScheduledTrip(ride) {
+  if (!ride) return false;
+  return (
+    ride.status === 'scheduled' ||
+    (ride.status === 'pending_payment' && ride.instant !== true)
+  );
+}
+
+export function liveRideForChild(rides, child) {
+  if (!child) return null;
+  return (rides || []).find((r) => isLiveTrip(r) && matchRideToChild(r, child)) || null;
+}
+
+export function scheduledRidesForChild(rides, child) {
+  if (!child) return [];
+  return (rides || []).filter((r) => isScheduledTrip(r) && matchRideToChild(r, child));
 }
 
 export function isTrackableStatus(status) {

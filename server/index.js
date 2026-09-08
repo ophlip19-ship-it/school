@@ -10,6 +10,7 @@ import User from './models/User.js';
 import Ride from './models/Ride.js';
 import Message from './models/Message.js';
 import { mapMessage, mapTransitRide, pushTransitFeed } from './utils/mappers.js';
+import { startScheduleJobs } from './utils/scheduleJobs.js';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
 import ridesRoutes from './routes/rides.js';
@@ -406,6 +407,7 @@ async function start() {
     server.listen(PORT, () => {
       console.log(`SchoolRun API listening on http://localhost:${PORT}`);
       console.log(`  health: http://localhost:${PORT}/api/health`);
+      startScheduleJobs(io);
     });
   } catch (err) {
     console.error('[startup] Failed to start server:', err.message);

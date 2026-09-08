@@ -1387,9 +1387,6 @@ export default function HomeDashboard() {
                         <h3 className="font-semibold text-slate-900">
                           {child.name}
                         </h3>
-                        <p className="truncate text-sm text-slate-600">
-                          {child.school} · {child.grade}
-                        </p>
                         {trip ? (
                           <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
                             <span
@@ -1413,14 +1410,7 @@ export default function HomeDashboard() {
                           Track
                         </Link>
                       ) : null}
-                      <Link
-                        to={`/add-child?id=${child.id}`}
-                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-500 hover:text-emerald-700"
-                        title="Edit profile / photo"
-                      >
-                        <Camera size={14} />
-                        {child.photoUrl ? 'Edit' : 'Photo'}
-                      </Link>
+                      
                     </div>
                   </div>
                 );

@@ -64,7 +64,9 @@ async function syncUpcomingSchoolPins(child, previous) {
 
   const rides = await Ride.find({
     childId: child._id,
-    status: { $in: ['pending_payment', 'open', 'requested', 'assigned'] },
+    status: {
+      $in: ['pending_payment', 'scheduled', 'open', 'requested', 'assigned'],
+    },
   });
 
   for (const ride of rides) {
