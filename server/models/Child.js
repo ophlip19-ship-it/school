@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 function parseLngLat(input) {
   if (!input || typeof input !== 'object') return null;
+  if (input.lng == null || input.lat == null) return null;
   const lng = Number(input.lng);
   const lat = Number(input.lat);
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;

@@ -308,10 +308,16 @@ export async function forwardGeocode(query, token = mapboxToken()) {
 }
 
 export function hasLngLat(point) {
+  // Number(null) === 0, so reject null/empty before coercing.
+  if (point == null || point.lng == null || point.lat == null) return false;
+  if (point.lng === "" || point.lat === "") return false;
+  const lng = Number(point.lng);
+  const lat = Number(point.lat);
   return (
-    point != null &&
-    Number.isFinite(Number(point.lng)) &&
-    Number.isFinite(Number(point.lat))
+    Number.isFinite(lng) &&
+    Number.isFinite(lat) &&
+    Math.abs(lng) <= 180 &&
+    Math.abs(lat) <= 90
   );
 }
 
