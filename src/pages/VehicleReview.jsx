@@ -87,6 +87,9 @@ export default function VehicleReview() {
             tripType: draft.tripType || 'pickup',
             recurring: draft.recurring || [],
             distanceKm: draft.distanceKm ?? undefined,
+            remind: draft.remind !== false,
+            remindMinutes:
+              draft.remind === false ? null : draft.remindMinutes ?? 30,
           });
           created.push(ride);
         } catch (err) {

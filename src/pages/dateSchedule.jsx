@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { getBookingDraft, setBookingDraft } from '../lib/booking';
 import {
   SCHOOL_DAYS,
+  clampRemindMinutes,
+  DEFAULT_REMIND_MINUTES,
   formatLongDate,
   formatTimeLabel,
   makeSlot,
@@ -11,12 +14,20 @@ import {
   todayKey,
   upcomingWeekdays,
 } from '../lib/schedule';
+import {
+  ensureNotificationPermission,
+  getSavedRemindMinutes,
+  initDeviceNotifications,
+  saveRemindMinutes,
+} from '../lib/notifications';
 import RideCalendar from '../components/RideCalendar';
+import RideReminderPicker from '../components/RideReminderPicker';
 
 const MAX_SLOTS = 8;
 
 export default function DateSchedule() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const draft = getBookingDraft();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -35,6 +46,15 @@ export default function DateSchedule() {
     return [];
   });
   const [remind, setRemind] = useState(draft.remind !== false);
+  const [remindMinutes, setRemindMinutes] = useState(() => {
+    if (draft.remindMinutes != null) {
+      return clampRemindMinutes(draft.remindMinutes);
+    }
+    if (user?.remindMinutes != null) {
+      return clampRemindMinutes(user.remindMinutes);
+    }
+    return getSavedRemindMinutes();
+  });
   const [error, setError] = useState('');
 
   const minKey = todayKey();
@@ -106,12 +126,22 @@ export default function DateSchedule() {
     });
   };
 
-  const save = () => {
+  const save = async () => {
     const nextSlots =
       slots.length > 0 ? slots : selectedDate && time ? [makeSlot(selectedDate, time)] : [];
     if (!nextSlots.length) {
       setError('Add at least one date and time.');
       return;
+    }
+    const minutes = clampRemindMinutes(remindMinutes, DEFAULT_REMIND_MINUTES);
+    if (remind) {
+      saveRemindMinutes(minutes);
+      try {
+        await ensureNotificationPermission();
+        await initDeviceNotifications({ subscribeIfGranted: true });
+      } catch {
+        /* booking still proceeds if permission is declined */
+      }
     }
     setBookingDraft({
       date: nextSlots[0].date,
@@ -120,6 +150,7 @@ export default function DateSchedule() {
       tripType,
       recurring,
       remind,
+      remindMinutes: remind ? minutes : null,
       instant: false,
     });
     navigate('/vehicle-review');
@@ -134,8 +165,8 @@ export default function DateSchedule() {
         Date &amp; schedule
       </h1>
       <p className="mt-2 text-slate-600">
-        Book one ride or several at different times. We&apos;ll remind you 30
-        minutes before each pickup.
+        Book one ride or several at different times. Choose the alarm time
+        you want — we&apos;ll use this device&apos;s notifications.
       </p>
 
       <div className="mt-8 space-y-5">
@@ -271,28 +302,24 @@ export default function DateSchedule() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setRemind((v) => !v)}
-          className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left ${
-            remind
-              ? 'border-emerald-200 bg-emerald-50'
-              : 'border-slate-200 bg-white'
-          }`}
-        >
-          <Bell
-            size={18}
-            className={`mt-0.5 shrink-0 ${remind ? 'text-emerald-700' : 'text-slate-400'}`}
-          />
-          <span>
-            <span className="block text-sm font-semibold text-slate-900">
-              Remind me 30 minutes before
-            </span>
-            <span className="mt-0.5 block text-xs text-slate-600">
-              In-app notification plus an event you can save to your calendar.
-            </span>
-          </span>
-        </button>
+        <RideReminderPicker
+          enabled={remind}
+          onEnabledChange={async (next) => {
+            setRemind(next);
+            if (next) {
+              try {
+                await ensureNotificationPermission();
+                await initDeviceNotifications({ subscribeIfGranted: true });
+              } catch {
+                /* ignore */
+              }
+            }
+          }}
+          minutes={remindMinutes}
+          onMinutesChange={setRemindMinutes}
+          rideDate={slots[0]?.date || selectedDate}
+          rideTime={slots[0]?.time || time}
+        />
       </div>
 
       {error && (

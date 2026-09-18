@@ -73,7 +73,9 @@ const rideSchema = new mongoose.Schema(
     instant: { type: Boolean, default: false, index: true },
     /** Weekdays used when the parent created a repeating schedule. */
     recurring: { type: [String], default: [] },
-    /** When a 30-minute reminder was last sent to the parent. */
+    /** Minutes before pickup to alarm the parent. Null disables the reminder. */
+    remindMinutes: { type: Number, default: 30 },
+    /** When a reminder was last sent to the parent. */
     remindedAt: { type: Date, default: null },
     status: {
       type: String,

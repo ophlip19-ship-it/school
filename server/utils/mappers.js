@@ -76,6 +76,8 @@ export function mapRide(ride, extras = {}) {
     tripType: r.tripType,
     instant: !!r.instant,
     recurring: Array.isArray(r.recurring) ? r.recurring : [],
+    remindMinutes:
+      r.remindMinutes == null ? null : Number(r.remindMinutes),
     remindedAt: r.remindedAt || null,
     status: r.status,
     fareCents: r.fareCents,

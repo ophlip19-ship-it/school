@@ -708,9 +708,8 @@ export default function HomeDashboard() {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-10">
         {/* Primary column */}
         <div className="space-y-8 lg:col-span-3">
-          {(activeRides.length > 0 || routePickup || routeDropoff) ? (
-          <div className="space-y-5">
           {activeRides.length > 0 ? (
+          <div className="space-y-5">
             <section>
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="text-lg font-bold text-slate-900">
@@ -755,19 +754,14 @@ export default function HomeDashboard() {
                 ))}
               </div>
             </section>
-          ) : null}
 
-          {(routePickup || routeDropoff || activeRides.length > 0) && (
             <section>
               <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">Family map</h2>
                   <p className="mt-0.5 text-sm text-slate-500">
-                    {activeRides.length > 0
-                      ? `Tracking ${activeRides.length} active trip${
-                          activeRides.length === 1 ? '' : 's'
-                        } — tap a child to focus`
-                      : 'Preview the route for the selected child'}
+                    Tracking {activeRides.length} active trip
+                    {activeRides.length === 1 ? '' : 's'} — tap a child to focus
                   </p>
                 </div>
                 {focusedChildTrip && isTrackableStatus(focusedChildTrip.status) ? (
@@ -786,12 +780,9 @@ export default function HomeDashboard() {
                 children={children}
                 focusChildId={selectedChildId}
                 onSelectTrip={selectTripOnMap}
-                className={
-                  activeRides.length > 0 ? 'h-64 sm:h-80' : 'h-48 sm:h-56'
-                }
+                className="h-64 sm:h-80"
               />
             </section>
-          )}
           </div>
           ) : null}
 

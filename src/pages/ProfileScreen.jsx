@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import AddressSearchInput from '../components/AddressSearchInput';
+import NotificationSettings from '../components/NotificationSettings';
+import RideReminderPicker from '../components/RideReminderPicker';
 import PageShell from '../components/PageShell';
+import {
+  clampRemindMinutes,
+  DEFAULT_REMIND_MINUTES,
+} from '../lib/schedule';
+import { saveRemindMinutes } from '../lib/notifications';
 import {
   LogOut,
   Mail,
@@ -20,7 +27,7 @@ import {
 } from 'lucide-react';
 
 export default function ProfileScreen() {
-  const { user, logout, confirmIdentity, updateUser } = useAuth();
+  const { user, logout, confirmIdentity, updateUser, updatePrefs } = useAuth();
   const navigate = useNavigate();
 
   const [editing, setEditing] = useState(false);
@@ -40,6 +47,12 @@ export default function ProfileScreen() {
   const [saveSuccess, setSaveSuccess] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [savePassword, setSavePassword] = useState('');
+  const [remindMinutes, setRemindMinutes] = useState(
+    DEFAULT_REMIND_MINUTES,
+  );
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsMessage, setPrefsMessage] = useState('');
+  const [prefsError, setPrefsError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -48,6 +61,9 @@ export default function ProfileScreen() {
     setHomeAddress(user.homeAddress || '');
     setHomeCoords(user.homeCoords || null);
     setVehiclePlate(user.vehiclePlate || '');
+    if (user.remindMinutes != null) {
+      setRemindMinutes(clampRemindMinutes(user.remindMinutes));
+    }
   }, [user]);
 
   const handleLogout = () => {
@@ -355,6 +371,56 @@ export default function ProfileScreen() {
         <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
           {saveSuccess}
         </p>
+      )}
+
+      {isParent && (
+        <div className="mt-6 space-y-3">
+          <h2 className="text-lg font-bold text-slate-900">Ride reminders</h2>
+          <p className="text-sm text-slate-500">
+            Default alarm time for new scheduled rides, plus this device&apos;s
+            notification permission.
+          </p>
+          <RideReminderPicker
+            enabled
+            hideToggle
+            minutes={remindMinutes}
+            onMinutesChange={(next) => {
+              setRemindMinutes(clampRemindMinutes(next));
+              setPrefsMessage('');
+            }}
+            compact
+            showDeviceSettings={false}
+          />
+          <button
+            type="button"
+            disabled={prefsSaving}
+            onClick={async () => {
+              const minutes = clampRemindMinutes(remindMinutes);
+              saveRemindMinutes(minutes);
+              setPrefsSaving(true);
+              setPrefsError('');
+              setPrefsMessage('');
+              try {
+                await updatePrefs({ remindMinutes: minutes });
+                setPrefsMessage('Default reminder time saved.');
+              } catch (err) {
+                setPrefsError(err.message || 'Could not save reminder time');
+              } finally {
+                setPrefsSaving(false);
+              }
+            }}
+            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {prefsSaving ? 'Saving…' : 'Save default alarm'}
+          </button>
+          {prefsMessage ? (
+            <p className="text-xs font-medium text-emerald-700">{prefsMessage}</p>
+          ) : null}
+          {prefsError ? (
+            <p className="text-xs font-medium text-red-700">{prefsError}</p>
+          ) : null}
+          <NotificationSettings />
+        </div>
       )}
 
       {isParent && (

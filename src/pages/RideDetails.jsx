@@ -1,10 +1,27 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { CalendarPlus } from 'lucide-react';
-import { formatMoney } from '../lib/api';
-import { downloadRideIcs, googleCalendarUrl } from '../lib/schedule';
+import { formatMoney, ridesApi } from '../lib/api';
+import {
+  clampRemindMinutes,
+  downloadRideIcs,
+  formatRemindLead,
+  googleCalendarUrl,
+} from '../lib/schedule';
+import RideReminderPicker from '../components/RideReminderPicker';
 
 export default function RideDetails() {
-  const { state: ride } = useLocation();
+  const { state } = useLocation();
+  const [ride, setRide] = useState(state);
+  const [remindEnabled, setRemindEnabled] = useState(
+    state?.remindMinutes != null,
+  );
+  const [remindMinutes, setRemindMinutes] = useState(
+    state?.remindMinutes != null ? clampRemindMinutes(state.remindMinutes) : 30,
+  );
+  const [remindSaving, setRemindSaving] = useState(false);
+  const [remindError, setRemindError] = useState('');
+  const [remindMessage, setRemindMessage] = useState('');
 
   if (!ride) {
     return (
@@ -37,6 +54,12 @@ export default function RideDetails() {
           ['Payment', ride.paymentStatus],
           ['Fare', formatMoney(ride.fareCents)],
           ['Handover PIN', ride.handoverPin],
+          [
+            'Reminder',
+            ride.remindMinutes != null
+              ? formatRemindLead(ride.remindMinutes)
+              : 'Off',
+          ],
         ].map(([label, value]) => (
           <div
             key={label}
@@ -49,6 +72,49 @@ export default function RideDetails() {
           </div>
         ))}
       </div>
+
+      {['scheduled', 'pending_payment'].includes(ride.status) ? (
+        <div className="mt-6 space-y-3">
+          <RideReminderPicker
+            enabled={remindEnabled}
+            onEnabledChange={setRemindEnabled}
+            minutes={remindMinutes}
+            onMinutesChange={setRemindMinutes}
+            rideDate={ride.date}
+            rideTime={ride.time}
+          />
+          <button
+            type="button"
+            disabled={remindSaving}
+            onClick={async () => {
+              setRemindSaving(true);
+              setRemindError('');
+              setRemindMessage('');
+              try {
+                const { ride: updated } = await ridesApi.updateReminder(ride.id, {
+                  remind: remindEnabled,
+                  remindMinutes: remindEnabled ? remindMinutes : null,
+                });
+                setRide(updated);
+                setRemindMessage('Reminder alarm updated.');
+              } catch (err) {
+                setRemindError(err.message || 'Could not update reminder');
+              } finally {
+                setRemindSaving(false);
+              }
+            }}
+            className="w-full rounded-2xl bg-emerald-600 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {remindSaving ? 'Saving…' : 'Save reminder alarm'}
+          </button>
+          {remindMessage ? (
+            <p className="text-sm text-emerald-700">{remindMessage}</p>
+          ) : null}
+          {remindError ? (
+            <p className="text-sm text-red-700">{remindError}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-3">
         <div className="grid grid-cols-2 gap-2">

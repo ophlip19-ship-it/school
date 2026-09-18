@@ -142,6 +142,49 @@ function icsEscape(text) {
     .replace(/;/g, '\\;');
 }
 
+export const REMIND_PRESETS = [5, 10, 15, 30, 45, 60, 90, 120];
+export const DEFAULT_REMIND_MINUTES = 30;
+export const MIN_REMIND_MINUTES = 0;
+export const MAX_REMIND_MINUTES = 720;
+
+export function clampRemindMinutes(value, fallback = DEFAULT_REMIND_MINUTES) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(MAX_REMIND_MINUTES, Math.max(MIN_REMIND_MINUTES, Math.round(n)));
+}
+
+export function formatRemindLead(minutes) {
+  const n = clampRemindMinutes(minutes, 0);
+  if (n === 0) return 'At pickup time';
+  if (n < 60) return `${n} min before`;
+  const hours = n / 60;
+  if (Number.isInteger(hours)) {
+    return hours === 1 ? '1 hour before' : `${hours} hours before`;
+  }
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return `${h}h ${m}m before`;
+}
+
+/** HH:MM of the reminder alarm for a ride date/time. */
+export function alarmTimeFromRide(date, time, minutesBefore) {
+  const dt = rideDateTime({ date, time });
+  if (!dt) return '';
+  dt.setMinutes(dt.getMinutes() - clampRemindMinutes(minutesBefore, 0));
+  return `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+/** Minutes before pickup implied by an alarm HH:MM on the same date. */
+export function minutesBeforeFromAlarm(date, time, alarmTime) {
+  const ride = rideDateTime({ date, time });
+  if (!ride) return DEFAULT_REMIND_MINUTES;
+  const alarm = rideDateTime({ date, time: alarmTime });
+  if (!alarm) return DEFAULT_REMIND_MINUTES;
+  const mins = Math.round((ride.getTime() - alarm.getTime()) / 60000);
+  if (mins < 0) return 0;
+  return clampRemindMinutes(mins, 0);
+}
+
 export function rideCalendarTitle(ride) {
   const child = ride?.childName || 'Child';
   const kind =
@@ -149,13 +192,23 @@ export function rideCalendarTitle(ride) {
   return `SchoolRun · ${child} ${kind}`;
 }
 
-export function buildRideIcs(ride, { alarmMinutes = 30 } = {}) {
+export function buildRideIcs(ride, { alarmMinutes = 30, includeAlarm = true } = {}) {
   const start = rideDateTime(ride);
   if (!start) return '';
   const end = new Date(start.getTime() + 45 * 60 * 1000);
   const uid = `${ride.id || ride.date + ride.time}@schoolrun`;
   const title = rideCalendarTitle(ride);
   const desc = `${ride.pickup || ''} → ${ride.dropoff || ''}`;
+  const minutes = Math.max(0, Math.round(Number(alarmMinutes) || 0));
+  const alarmBlock = includeAlarm
+    ? [
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${icsEscape(`Reminder: ${title}`)}`,
+        `TRIGGER:-PT${minutes}M`,
+        'END:VALARM',
+      ]
+    : [];
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -170,11 +223,7 @@ export function buildRideIcs(ride, { alarmMinutes = 30 } = {}) {
     `SUMMARY:${icsEscape(title)}`,
     `DESCRIPTION:${icsEscape(desc)}`,
     `LOCATION:${icsEscape(ride.pickup || '')}`,
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    `DESCRIPTION:${icsEscape(`Reminder: ${title}`)}`,
-    `TRIGGER:-PT${Math.max(1, alarmMinutes)}M`,
-    'END:VALARM',
+    ...alarmBlock,
     'END:VEVENT',
     'END:VCALENDAR',
     '',
@@ -182,7 +231,14 @@ export function buildRideIcs(ride, { alarmMinutes = 30 } = {}) {
 }
 
 export function downloadRideIcs(ride) {
-  const ics = buildRideIcs(ride);
+  const enabled = ride?.remindMinutes != null;
+  const alarmMinutes = enabled
+    ? clampRemindMinutes(ride.remindMinutes, DEFAULT_REMIND_MINUTES)
+    : DEFAULT_REMIND_MINUTES;
+  const ics = buildRideIcs(ride, {
+    alarmMinutes,
+    includeAlarm: enabled,
+  });
   if (!ics) return;
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);

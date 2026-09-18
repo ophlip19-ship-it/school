@@ -30,6 +30,19 @@ const userSchema = new mongoose.Schema(
       heading: { type: Number, default: 0 },
       updatedAt: { type: Date, default: null },
     },
+    /** Default reminder lead time in minutes before a scheduled ride. */
+    remindMinutes: { type: Number, default: 30 },
+    pushSubscriptions: [
+      {
+        endpoint: { type: String, required: true },
+        keys: {
+          p256dh: { type: String, default: '' },
+          auth: { type: String, default: '' },
+        },
+        userAgent: { type: String, default: '' },
+        updatedAt: { type: Date, default: Date.now },
+      },
+    ],
     verified: { type: Boolean, default: false },
     suspended: { type: Boolean, default: false },
   },
@@ -60,6 +73,8 @@ userSchema.methods.toPublic = function toPublic() {
         : null,
     verified: !!this.verified,
     suspended: !!this.suspended,
+    remindMinutes:
+      this.remindMinutes == null ? 30 : Number(this.remindMinutes),
     createdAt: this.createdAt,
     parentName:
       this.role === 'parent' || this.role === 'admin' ? this.name : undefined,

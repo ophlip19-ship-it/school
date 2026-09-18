@@ -111,6 +111,12 @@ export const AuthProvider = ({ children }) => {
     return null;
   }, []);
 
+  const updatePrefs = useCallback(async (prefs) => {
+    const { user: me } = await authApi.updatePrefs(prefs);
+    setUser(me);
+    return me;
+  }, []);
+
   const verifyAccount = useCallback(async () => {
     const { user: me } = await authApi.verify();
     setUser(me);
@@ -129,6 +135,7 @@ export const AuthProvider = ({ children }) => {
       registerUser,
       login,
       updateUser,
+      updatePrefs,
       confirmIdentity,
       refreshUser,
       verifyAccount,
@@ -140,6 +147,7 @@ export const AuthProvider = ({ children }) => {
       registerUser,
       login,
       updateUser,
+      updatePrefs,
       confirmIdentity,
       refreshUser,
       verifyAccount,

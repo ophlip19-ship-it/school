@@ -51,6 +51,7 @@ export const authApi = {
   confirmIdentity: (body) =>
     api("/auth/confirm-identity", { method: "POST", body }),
   verify: () => api("/auth/verify", { method: "POST", body: {} }),
+  updatePrefs: (body) => api("/auth/prefs", { method: "PATCH", body }),
 };
 
 export const childrenApi = {
@@ -93,6 +94,17 @@ export const ridesApi = {
   getLocation: (id) => api(`/rides/${id}/location`),
   updateLocation: (id, body) =>
     api(`/rides/${id}/location`, { method: "POST", body }),
+  updateReminder: (id, body) =>
+    api(`/rides/${id}/reminder`, { method: "PATCH", body }),
+};
+
+export const notificationsApi = {
+  vapidKey: () => api("/notifications/vapid-public-key"),
+  subscribe: (body) =>
+    api("/notifications/subscribe", { method: "POST", body }),
+  unsubscribe: (body) =>
+    api("/notifications/subscribe", { method: "DELETE", body }),
+  test: () => api("/notifications/test", { method: "POST", body: {} }),
 };
 
 export const paymentsApi = {
