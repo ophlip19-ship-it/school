@@ -4,9 +4,10 @@
  */
 export const VAPID_PUBLIC_KEY =
   process.env.VAPID_PUBLIC_KEY ||
-  'BNqkQq0mYkQh5c0mYkQh5c0mYkQh5c0mYkQh5c0mYkQh5c0mYkQh5c0mYkQh5c0mYkQh5c0mYkQ';
+  'BDf5_1a72MMNKOv8e1NK7eA5nPvGqh7pPXvxtaPYlGTnpRGM4K95qr_PWdfR8Jn3LIqEHhODs16D8ZXNEjxx05c';
 export const VAPID_PRIVATE_KEY =
-  process.env.VAPID_PRIVATE_KEY || '';
+  process.env.VAPID_PRIVATE_KEY ||
+  'rnEs7IW1cuzQnR7aZMnkyELd5H0KbxWS_C5KRtF1UHg';
 export const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || 'mailto:schoolrun@localhost';
 

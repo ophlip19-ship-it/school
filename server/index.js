@@ -18,6 +18,8 @@ import paymentsRoutes from './routes/payments.js';
 import chatRoutes from './routes/chat.js';
 import adminRoutes from './routes/admin.js';
 import driversRoutes from './routes/drivers.js';
+import notificationsRoutes from './routes/notifications.js';
+import { initPush } from './utils/push.js';
 
 const PORT = Number(process.env.PORT || 5000);
 // Comma-separated list supported, e.g. CLIENT_ORIGIN=https://app.vercel.app,http://localhost:3000
@@ -77,6 +79,7 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/drivers', driversRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // JSON 404 for unknown API paths (avoid Express HTML "Cannot GET …")
 app.use('/api', (req, res) => {
@@ -404,6 +407,7 @@ io.on('connection', (socket) => {
 async function start() {
   try {
     await connectDb();
+    initPush();
     server.listen(PORT, () => {
       console.log(`SchoolRun API listening on http://localhost:${PORT}`);
       console.log(`  health: http://localhost:${PORT}/api/health`);

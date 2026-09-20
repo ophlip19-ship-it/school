@@ -35,3 +35,25 @@ export const LIVE_TRIP_STATUSES = [
 ];
 
 export const SCHEDULED_STATUSES = ['scheduled'];
+
+/** Show on the parent live map / driver active slot. */
+export const LIVE_SOON_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * True when the ride is happening now (or within LIVE_SOON_MS).
+ * Future scheduled requests stay off the live map until they are due.
+ */
+export function isLiveNow(ride, now = Date.now()) {
+  if (!ride) return false;
+  const status = ride.status;
+  if (['assigned', 'in_transit'].includes(status)) return true;
+  if (status === 'pending_payment' && ride.instant) return true;
+  if (!['open', 'requested'].includes(status)) return false;
+  if (ride.instant) return true;
+  const when = parseRideDateTime(
+    ride.date || ride.rideDate,
+    ride.time || ride.rideTime,
+  );
+  if (!when) return true;
+  return when.getTime() - now <= LIVE_SOON_MS;
+}

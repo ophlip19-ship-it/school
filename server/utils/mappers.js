@@ -99,7 +99,7 @@ export function mapRide(ride, extras = {}) {
     currency: r.currency,
     handoverPin: r.handoverPin,
     paymentStatus: r.paymentStatus,
-    stripePaymentIntentId: r.stripePaymentIntentId,
+    stripePaymentIntentId: r.stripePaymentIntentId || null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     parentName: parentObj?.name,
@@ -127,9 +127,38 @@ export function pushTransitFeed(ride, type, message, coords = null) {
   return entry;
 }
 
+function withSecretsRedacted(mapped, { canSeePin, canSeeStripe, canSeeParentContact }) {
+  return {
+    ...mapped,
+    handoverPin: canSeePin ? mapped.handoverPin : null,
+    stripePaymentIntentId: canSeeStripe ? mapped.stripePaymentIntentId : null,
+    parentPhone: canSeeParentContact ? mapped.parentPhone : undefined,
+  };
+}
+
+/**
+ * Driver inbox / open pool — never include handover PIN or payment ids.
+ * Parent GPS is only shown when this driver was specifically requested.
+ */
+export function mapRideOffer(ride) {
+  const mapped = mapRide(ride);
+  if (!mapped) return null;
+  return withSecretsRedacted(
+    {
+      ...mapped,
+      parentLocation:
+        mapped.status === 'requested' ? mapped.parentLocation : null,
+      driverLocation: null,
+      trail: [],
+    },
+    { canSeePin: false, canSeeStripe: false, canSeeParentContact: false },
+  );
+}
+
 /**
  * Redact live GPS for parents until driver confirms pickup (locationSharing).
- * Drivers and admins always see location when present.
+ * Handover PIN and payment ids are only visible to the parent, admin, or
+ * the driver after they accept (assigned / in transit / completed).
  */
 export function mapRideForViewer(ride, viewer) {
   const mapped = mapRide(ride);
@@ -145,23 +174,41 @@ export function mapRideForViewer(ride, viewer) {
     mapped.parentId &&
     String(mapped.parentId) === String(viewer.id);
 
-  if (isAdmin || isDriver) return mapped;
+  const driverAccepted = ['assigned', 'in_transit', 'completed', 'scheduled'].includes(
+    mapped.status,
+  );
+  const canSeePin = isAdmin || isParent || (isDriver && driverAccepted);
+  const canSeeStripe = isAdmin || isParent;
+  const canSeeParentContact = isAdmin || isParent || (isDriver && driverAccepted);
+
+  const secured = withSecretsRedacted(mapped, {
+    canSeePin,
+    canSeeStripe,
+    canSeeParentContact,
+  });
+
+  if (isAdmin) return secured;
+
+  if (isDriver) return secured;
 
   if (isParent) {
     const canSeeLive =
       mapped.locationSharing && mapped.status === 'in_transit';
     return {
-      ...mapped,
+      ...secured,
       driverLocation: canSeeLive ? mapped.driverLocation : null,
       trail: canSeeLive ? mapped.trail : [],
     };
   }
 
-  // Other roles / unexpected viewers — hide live GPS
   return {
-    ...mapped,
+    ...secured,
+    parentLocation: null,
     driverLocation: null,
     trail: [],
+    handoverPin: null,
+    stripePaymentIntentId: null,
+    parentPhone: undefined,
   };
 }
 

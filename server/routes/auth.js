@@ -226,6 +226,34 @@ router.patch('/me', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * Lightweight preference update (no password). Parents set default reminder lead time.
+ */
+router.patch('/prefs', requireAuth, async (req, res) => {
+  try {
+    const { remindMinutes } = req.body || {};
+    if (remindMinutes !== undefined) {
+      if (remindMinutes === null) {
+        req.userDoc.remindMinutes = 30;
+      } else {
+        const n = Number(remindMinutes);
+        if (!Number.isFinite(n) || n < 0 || n > 720) {
+          return res
+            .status(400)
+            .json({ error: 'Reminder time must be between 0 and 720 minutes' });
+        }
+        req.userDoc.remindMinutes = Math.round(n);
+      }
+    }
+    await req.userDoc.save();
+    const user = await enrichUser(req.userDoc.toPublic());
+    res.json({ user });
+  } catch (err) {
+    console.error('[auth/prefs PATCH]', err);
+    res.status(500).json({ error: 'Could not save preferences' });
+  }
+});
+
 router.post('/verify', requireAuth, async (req, res) => {
   try {
     req.userDoc.verified = true;

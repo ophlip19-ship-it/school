@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   mapRide,
   mapRideForViewer,
+  mapRideOffer,
   pushTransitFeed,
   mapTransitRide,
 } from '../utils/mappers.js';
@@ -15,7 +16,14 @@ import {
   pickNearestDriver,
   pricingDefaults,
 } from '../utils/pricing.js';
-import { LIVE_TRIP_STATUSES } from '../utils/rideTime.js';
+import { isLiveNow } from '../utils/rideTime.js';
+import { parseRemindMinutes } from '../utils/remind.js';
+import {
+  emitRideDispatch,
+  isRideDueSoon,
+  notifyDriverRequest,
+} from '../utils/dispatch.js';
+import { sendPushToUser } from '../utils/push.js';
 
 const router = Router();
 
@@ -113,7 +121,7 @@ router.get('/available', requireAuth, requireRole('driver'), async (req, res) =>
         { status: 'requested', driverId: req.user.id },
       ],
     });
-    res.json({ rides: rides.map((r) => mapRide(r)) });
+    res.json({ rides: rides.map((r) => mapRideOffer(r)) });
   } catch (err) {
     console.error('[rides/available]', err);
     res.status(500).json({ error: 'Failed to list available rides' });
@@ -143,15 +151,8 @@ router.get('/active', requireAuth, async (req, res) => {
         .populate('driverId', 'name phone vehiclePlate');
 
       const mapped = list.map((r) => mapRideForViewer(r, req.user));
-      const isLive = (r) =>
-        LIVE_TRIP_STATUSES.includes(r.status) ||
-        (r.status === 'pending_payment' && r.instant);
-      const rides = mapped.filter(isLive);
-      const scheduled = mapped.filter(
-        (r) =>
-          r.status === 'scheduled' ||
-          (r.status === 'pending_payment' && !r.instant),
-      );
+      const rides = mapped.filter((r) => isLiveNow(r));
+      const scheduled = mapped.filter((r) => !isLiveNow(r));
       return res.json({
         rides,
         scheduled,
@@ -161,6 +162,7 @@ router.get('/active', requireAuth, async (req, res) => {
     }
 
     let ride = null;
+    let upcoming = [];
     if (req.user.role === 'driver') {
       ride = await Ride.findOne({
         driverId: req.user.id,
@@ -169,9 +171,25 @@ router.get('/active', requireAuth, async (req, res) => {
         .sort({ updatedAt: -1 })
         .populate('parentId', 'name phone')
         .populate('driverId', 'name phone vehiclePlate');
+
+      const booked = await Ride.find({
+        driverId: req.user.id,
+        paymentStatus: 'paid',
+        status: { $in: ['scheduled', 'requested'] },
+      })
+        .sort({ rideDate: 1, rideTime: 1 })
+        .populate('parentId', 'name phone')
+        .populate('driverId', 'name phone vehiclePlate');
+      upcoming = booked
+        .map((r) => mapRideForViewer(r, req.user))
+        .filter((r) => r && !isLiveNow(r));
     }
     const mapped = mapRideForViewer(ride, req.user);
-    res.json({ ride: mapped, rides: mapped ? [mapped] : [] });
+    res.json({
+      ride: mapped,
+      rides: mapped ? [mapped] : [],
+      upcoming,
+    });
   } catch (err) {
     console.error('[rides/active]', err);
     res.status(500).json({ error: 'Failed to get active ride' });
@@ -269,6 +287,8 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       recurring = [],
       /** choose | nearest | pool — parent choice vs auto nearest vs open pool */
       assignMode: rawAssignMode = null,
+      remind,
+      remindMinutes: rawRemindMinutes,
     } = req.body || {};
 
     if (!childId) {
@@ -294,7 +314,7 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
     let nearestMeta = null;
 
     const parent = await User.findById(req.user.id).select(
-      'homeAddress homeCoords',
+      'homeAddress homeCoords remindMinutes',
     );
 
     const now = new Date();
@@ -310,8 +330,11 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       const liveCount = await Ride.countDocuments({
         childId: child._id,
         $or: [
-          { status: { $in: LIVE_TRIP_STATUSES } },
-          { instant: true, status: 'pending_payment' },
+          { status: { $in: ['assigned', 'in_transit'] } },
+          {
+            instant: true,
+            status: { $in: ['pending_payment', 'open', 'requested'] },
+          },
         ],
       });
       if (liveCount > 0) {
@@ -490,6 +513,10 @@ router.post('/', requireAuth, requireRole('parent'), async (req, res) => {
       recurring: Array.isArray(recurring)
         ? recurring.map((d) => String(d)).filter(Boolean).slice(0, 7)
         : [],
+      remindMinutes: parseRemindMinutes(
+        { remind, remindMinutes: rawRemindMinutes },
+        parent?.remindMinutes ?? 30,
+      ),
       status: 'pending_payment',
       fareCents: fare.fareCents,
       distanceKm: fare.distanceKm,
@@ -749,7 +776,7 @@ router.post('/:id/cancel', requireAuth, requireRole('parent'), async (req, res) 
       return res.status(400).json({
         error:
           ride.status === 'assigned' || ride.status === 'in_transit'
-            ? 'A driver has already accepted this trip. Cancel is only available before accept.'
+            ? 'This trip is already live. Cancel is only available before pickup starts.'
             : 'This trip can no longer be cancelled',
       });
     }
@@ -817,12 +844,36 @@ router.post('/:id/accept', requireAuth, requireRole('driver'), async (req, res) 
       return res.status(400).json({ error: 'Ride is not available to accept' });
     }
 
+    const dueSoon = isRideDueSoon(ride);
     ride.driverId = req.user.id;
-    ride.status = 'assigned';
+    ride.status = ride.instant || dueSoon ? 'assigned' : 'scheduled';
+    pushTransitFeed(
+      ride,
+      'accepted',
+      ride.status === 'assigned'
+        ? `${req.user.name || 'Driver'} accepted — trip is live.`
+        : `${req.user.name || 'Driver'} accepted — booked for ${ride.rideDate} ${ride.rideTime}.`,
+    );
     await ride.save();
 
     const updated = await findRidePopulated({ _id: ride._id });
-    res.json({ ride: mapRide(updated) });
+    const io = req.app.get('io');
+    emitRideDispatch(io, updated);
+    if (updated.parentId) {
+      const parentId =
+        updated.parentId._id?.toString?.() || updated.parentId.toString();
+      sendPushToUser(parentId, {
+        title: `Driver accepted · ${updated.childName || 'Child'}`,
+        body:
+          updated.status === 'assigned'
+            ? 'Your driver is confirmed. Track from the dashboard when the trip is live.'
+            : `Booked for ${updated.rideDate} · ${updated.rideTime}.`,
+        tag: `accepted-${updated._id}`,
+        url: '/dashboard',
+        rideId: updated._id.toString(),
+      }).catch(() => {});
+    }
+    res.json({ ride: mapRideForViewer(updated, req.user) });
   } catch (err) {
     console.error('[rides accept]', err);
     res.status(500).json({ error: 'Failed to accept ride' });
@@ -846,10 +897,17 @@ router.post('/:id/reject', requireAuth, requireRole('driver'), async (req, res) 
 
     ride.driverId = null;
     ride.status = 'open';
+    ride.assignMode = 'pool';
+    pushTransitFeed(
+      ride,
+      'declined',
+      'Preferred driver declined — opened to all available drivers.',
+    );
     await ride.save();
 
     const updated = await findRidePopulated({ _id: ride._id });
-    res.json({ ride: mapRide(updated) });
+    emitRideDispatch(req.app.get('io'), updated);
+    res.json({ ride: mapRideForViewer(updated, req.user) });
   } catch (err) {
     console.error('[rides reject]', err);
     res.status(500).json({ error: 'Failed to decline ride' });
