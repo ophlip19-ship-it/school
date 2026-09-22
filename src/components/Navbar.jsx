@@ -82,9 +82,11 @@ export default function Navbar() {
             }
             className="flex items-center gap-2 font-bold text-slate-900"
           >
-            <span className="text-xl" aria-hidden>
-              🚌
-            </span>
+            <img
+              src="/product-logo.png"
+              alt=""
+              className="h-8 w-8 rounded-lg object-cover"
+            />
             <span>SchoolRun</span>
             <span className="ml-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
               {user?.role || 'user'}

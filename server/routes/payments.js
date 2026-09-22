@@ -4,7 +4,13 @@ import Ride from '../models/Ride.js';
 import Payment from '../models/Payment.js';
 import User from '../models/User.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { haversineKm, pickNearestDriver } from '../utils/pricing.js';
+import { pushTransitFeed } from '../utils/mappers.js';
+import {
+  emitRideDispatch,
+  notifyDriverRequest,
+  paidDispatchFeedMessage,
+  resolvePostPaymentAssignment,
+} from '../utils/dispatch.js';
 
 const router = Router();
 
@@ -38,65 +44,7 @@ async function listFreeDriversNear(targetCoords = null) {
     .sort((a, b) => a._distKm - b._distKm);
 }
 
-/**
- * After payment succeeds, resolve post-pay status from assignMode:
- *  - choose  → keep preferred driver, status requested
- *  - nearest → re-pick nearest free driver (fresh GPS), status requested
- *  - pool    → clear driver, status open for any driver
- */
-async function resolvePostPaymentAssignment(ride) {
-  const mode = String(ride.assignMode || '').toLowerCase();
-  const pickup = ride.pickupCoords;
-
-  if (mode === 'pool') {
-    return { driverId: null, status: 'open', assignMode: 'pool' };
-  }
-
-  if (mode === 'nearest') {
-    const free = await listFreeDriversNear(pickup);
-    // Prefer a free driver who still matches provisional pick if still free
-    const provisionalId = ride.driverId?.toString?.() || ride.driverId;
-    const stillFree = provisionalId
-      ? free.find((d) => d._id.toString() === provisionalId)
-      : null;
-    const picked = stillFree
-      ? { driver: stillFree }
-      : pickNearestDriver(free, pickup);
-
-    if (picked?.driver) {
-      return {
-        driverId: picked.driver._id,
-        status: 'requested',
-        assignMode: 'nearest',
-      };
-    }
-    // Nobody free with GPS → fall open so any driver can grab it
-    return { driverId: null, status: 'open', assignMode: 'pool' };
-  }
-
-  // choose (or legacy rides with a preferred driverId)
-  if (ride.driverId) {
-    // Ensure preferred driver is still active / not suspended
-    const driver = await User.findOne({
-      _id: ride.driverId,
-      role: 'driver',
-      suspended: { $ne: true },
-    }).select('_id');
-    if (driver) {
-      return {
-        driverId: driver._id,
-        status: 'requested',
-        assignMode: 'choose',
-      };
-    }
-    // Preferred driver gone → open pool
-    return { driverId: null, status: 'open', assignMode: 'pool' };
-  }
-
-  return { driverId: null, status: 'open', assignMode: mode || 'pool' };
-}
-
-async function markRidePaid(rideId, userId, amountCents, provider, providerRef) {
+async function markRidePaid(rideId, userId, amountCents, provider, providerRef, io) {
   const payment = await Payment.create({
     rideId,
     userId,
@@ -107,31 +55,28 @@ async function markRidePaid(rideId, userId, amountCents, provider, providerRef) 
     providerRef: providerRef || null,
   });
 
-  const existing = await Ride.findById(rideId).select(
-    'driverId assignMode pickupCoords instant',
-  );
+  const ride = await Ride.findById(rideId);
+  if (!ride) return payment._id.toString();
 
-  // Instant rides dispatch now. Scheduled rides wait until their calendar time.
-  let next = {
-    driverId: existing?.driverId || null,
-    status: 'scheduled',
-    assignMode: existing?.assignMode || 'pool',
-  };
-  if (!existing || existing.instant) {
-    next = existing
-      ? await resolvePostPaymentAssignment(existing)
-      : { driverId: null, status: 'open', assignMode: 'pool' };
+  // Instant and scheduled rides both send a driver request as soon as they are paid.
+  const next = await resolvePostPaymentAssignment(ride);
+  ride.paymentStatus = 'paid';
+  ride.status = next.status;
+  ride.driverId = next.driverId;
+  ride.assignMode = next.assignMode;
+  if (provider === 'stripe' && providerRef) {
+    ride.stripePaymentIntentId = providerRef;
   }
+  pushTransitFeed(ride, 'paid', paidDispatchFeedMessage(ride, next));
+  await ride.save();
 
-  await Ride.findByIdAndUpdate(rideId, {
-    paymentStatus: 'paid',
-    status: next.status,
-    driverId: next.driverId,
-    assignMode: next.assignMode,
-    ...(provider === 'stripe' && providerRef
-      ? { stripePaymentIntentId: providerRef }
-      : {}),
-  });
+  const populated = await Ride.findById(ride._id)
+    .populate('parentId', 'name phone')
+    .populate('driverId', 'name phone vehiclePlate');
+  emitRideDispatch(io, populated);
+  if (next.status === 'requested') {
+    notifyDriverRequest(populated).catch(() => {});
+  }
 
   return payment._id.toString();
 }
@@ -260,6 +205,7 @@ router.post(
         ride.fareCents,
         'demo',
         `demo_${Date.now().toString(36)}`,
+        req.app.get('io'),
       );
 
       const updated = await Ride.findById(ride._id);
@@ -322,6 +268,7 @@ router.post(
         ride.fareCents,
         'stripe',
         paymentIntentId,
+        req.app.get('io'),
       );
 
       const updated = await Ride.findById(ride._id);
@@ -419,6 +366,7 @@ router.post(
         ride.fareCents,
         'transfer',
         given || expectedRef,
+        req.app.get('io'),
       );
 
       // Store optional sender note on payment via providerRef already set

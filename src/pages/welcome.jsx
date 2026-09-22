@@ -5,9 +5,11 @@ export default function Welcome() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-emerald-50 via-white to-slate-50 p-4 text-center sm:p-6 lg:p-10">
       <div className="mb-8 w-full max-w-sm sm:mb-10 sm:max-w-md lg:max-w-lg">
-        <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-emerald-100 text-5xl shadow-sm sm:h-28 sm:w-28 sm:text-6xl">
-          🚌
-        </div>
+        <img
+          src="/product-logo.png"
+          alt="SchoolRun"
+          className="mx-auto mb-6 h-24 w-24 rounded-3xl object-cover shadow-sm sm:h-28 sm:w-28"
+        />
         <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
           SchoolRun
         </h1>

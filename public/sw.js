@@ -30,8 +30,8 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(data.title || 'SchoolRun', {
       body: data.body || '',
       tag: data.tag || 'schoolrun',
-      icon: '/favicon.svg',
-      badge: '/favicon.svg',
+      icon: '/product-logo.png',
+      badge: '/product-logo.png',
       vibrate: [200, 80, 200, 80, 400],
       renotify: true,
       requireInteraction: data.requireInteraction !== false,

@@ -24,12 +24,35 @@ export default function NotificationSettings({ compact = false }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [awaitingReturn, setAwaitingReturn] = useState(false);
   const guidance = getDeviceNotificationGuidance();
 
   useEffect(() => {
     setPermission(notificationPermission());
     return subscribePermissionChanges((next) => setPermission(next));
   }, []);
+
+  useEffect(() => {
+    if (!awaitingReturn) return undefined;
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const next = notificationPermission();
+      setPermission(next);
+      if (next === 'granted') {
+        await initDeviceNotifications({ subscribeIfGranted: true });
+        await subscribePush();
+        setMessage('Device notifications are on.');
+        setError('');
+        setAwaitingReturn(false);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [awaitingReturn]);
 
   const allow = async () => {
     setBusy(true);
@@ -57,9 +80,33 @@ export default function NotificationSettings({ compact = false }) {
   const openSettings = async () => {
     setBusy(true);
     setError('');
+    setMessage('');
     try {
-      await openDeviceNotificationSettings();
-      setPermission(notificationPermission());
+      const result = await openDeviceNotificationSettings();
+      setPermission(result.permission);
+      if (result.permission === 'granted') {
+        await initDeviceNotifications({ subscribeIfGranted: true });
+        await subscribePush();
+        setMessage('Device notifications are on. You will get ride alarms here.');
+        setAwaitingReturn(false);
+      } else if (result.method === 'prompt' && result.permission === 'denied') {
+        setError(
+          'Notifications were blocked. Use Device settings, allow this site, then return here.',
+        );
+        setAwaitingReturn(true);
+      } else if (result.opened) {
+        setMessage(
+          'Opened this device’s notification settings. Allow SchoolRun, then come back.',
+        );
+        setAwaitingReturn(true);
+      } else {
+        setError(
+          'Could not open settings automatically. Follow the steps below, then return here.',
+        );
+        setAwaitingReturn(true);
+      }
+    } catch (err) {
+      setError(err.message || 'Could not open device notification settings');
     } finally {
       setBusy(false);
     }
@@ -164,11 +211,14 @@ export default function NotificationSettings({ compact = false }) {
           disabled={busy}
           className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
         >
-          <ExternalLink size={12} /> Device settings
+          <ExternalLink size={12} />
+          {permission === 'default' ? 'Use device prompt' : 'Device settings'}
         </button>
       </div>
 
-      {permission === 'denied' || (!compact && permission !== 'granted') ? (
+      {permission === 'denied' ||
+      awaitingReturn ||
+      (!compact && permission !== 'granted') ? (
         <div className="mt-3">
           <p className="text-xs font-semibold text-slate-700">{guidance.heading}</p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-slate-600">

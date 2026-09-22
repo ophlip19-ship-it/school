@@ -150,62 +150,93 @@ export async function ensureNotificationPermission() {
   }
 }
 
-export function getDeviceNotificationGuidance() {
+function isStandalonePwa() {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia?.('(display-mode: standalone)')?.matches === true ||
+    window.navigator?.standalone === true
+  );
+}
+
+export function getNotificationPlatform() {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
-  const isAndroid = /Android/i.test(ua);
-  const isMac = /Mac OS X/i.test(ua) && !isIOS;
-  const isWin = /Windows/i.test(ua);
+  return {
+    isIOS,
+    isAndroid: /Android/i.test(ua),
+    isWin: /Windows/i.test(ua),
+    isMac: /Mac OS X/i.test(ua) && !isIOS,
+    isChrome: /Chrome|CriOS/i.test(ua) && !/Edg|OPR|SamsungBrowser/i.test(ua),
+    isEdge: /Edg/i.test(ua),
+    isFirefox: /Firefox|FxiOS/i.test(ua),
+    isSafari: /Safari/i.test(ua) && !/Chrome|CriOS|Android/i.test(ua),
+    standalone: isStandalonePwa(),
+  };
+}
 
-  if (isAndroid) {
+export function getDeviceNotificationGuidance() {
+  const p = getNotificationPlatform();
+
+  if (p.isAndroid) {
     return {
       platform: 'android',
-      heading: 'Turn on notifications on this phone',
-      steps: [
-        'Open Android Settings',
-        'Apps → Chrome (or SchoolRun if it is installed)',
-        'Notifications → allow this site',
-        'Return here and tap Allow notifications',
-      ],
+      heading: 'Allow SchoolRun in this phone’s notification settings',
+      steps: p.standalone
+        ? [
+            'Tap Device settings to open this app’s notification page',
+            'Turn notifications on for SchoolRun',
+            'Return here — the status updates automatically',
+          ]
+        : [
+            'Tap Device settings (or open Android Settings)',
+            'Apps → Chrome (or the browser you used) → Notifications',
+            'Allow notifications for this site',
+            'Come back to SchoolRun; status should show Allowed',
+          ],
     };
   }
-  if (isIOS) {
+  if (p.isIOS) {
     return {
       platform: 'ios',
-      heading: 'Turn on notifications on iPhone',
-      steps: [
-        'Share → Add to Home Screen so SchoolRun is an app',
-        'Open Settings → Notifications → SchoolRun (or Safari)',
-        'Turn Allow Notifications on',
-        'Reopen SchoolRun and tap Allow notifications',
-      ],
+      heading: 'Allow SchoolRun in iPhone notification settings',
+      steps: p.standalone
+        ? [
+            'Tap Device settings to open SchoolRun’s iOS settings',
+            'Turn Allow Notifications on',
+            'Reopen SchoolRun',
+          ]
+        : [
+            'Share → Add to Home Screen (required for iPhone alerts)',
+            'Open the Home Screen icon, then tap Allow when asked',
+            'Or Settings → Notifications → Safari / SchoolRun → Allow',
+          ],
     };
   }
-  if (isWin) {
+  if (p.isWin) {
     return {
       platform: 'windows',
-      heading: 'Turn on notifications on this PC',
+      heading: 'Allow SchoolRun in Windows notification settings',
       steps: [
-        'Click the lock icon in the address bar',
-        'Set Notifications to Allow',
-        'Or open Windows Settings → System → Notifications',
+        'Tap Device settings to open Windows Notifications',
+        'Or click the lock icon in the address bar → Notifications → Allow',
+        'Return here and send a test alarm',
       ],
     };
   }
-  if (isMac) {
+  if (p.isMac) {
     return {
       platform: 'mac',
-      heading: 'Turn on notifications on this Mac',
+      heading: 'Allow SchoolRun in Mac notification settings',
       steps: [
         'Click the lock icon in the address bar',
         'Set Notifications to Allow',
-        'Or open System Settings → Notifications → your browser',
+        'Or System Settings → Notifications → your browser → Allow',
       ],
     };
   }
   return {
     platform: 'other',
-    heading: 'Turn on notifications',
+    heading: 'Allow notifications for this site',
     steps: [
       'Click the lock or site-settings icon in the address bar',
       'Set Notifications to Allow',
@@ -214,42 +245,76 @@ export function getDeviceNotificationGuidance() {
   };
 }
 
+function clickProtocolLink(href) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 /**
- * Best-effort: re-prompt if still undecided, otherwise try an OS settings
- * deep link. Browsers cannot open chrome:// settings; callers should also
- * show getDeviceNotificationGuidance().
+ * Uses the real device/browser notification permission when still undecided.
+ * If already blocked, opens OS notification settings where the platform
+ * allows it (Android intents, iOS app-settings, Windows ms-settings).
  */
 export async function openDeviceNotificationSettings() {
-  const perm = notificationPermission();
-  if (perm === 'default' || perm === 'unsupported') {
-    return ensureNotificationPermission();
+  const before = notificationPermission();
+
+  if (before === 'unsupported') {
+    return { permission: before, opened: false, method: 'unsupported' };
   }
 
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  const candidates = [];
-  if (/Windows/i.test(ua)) {
-    candidates.push('ms-settings:notifications');
-    candidates.push('ms-settings:privacy-notifications');
-  }
-  if (/Android/i.test(ua)) {
-    candidates.push(
-      'intent://#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;end',
-    );
-  }
-
-  for (const href of candidates) {
-    try {
-      const opened = window.open(href, '_blank');
-      if (opened) return perm;
-    } catch {
-      /* try next */
+  // Native system prompt — this is the device notification permission dialog.
+  if (before === 'default') {
+    const result = await ensureNotificationPermission();
+    if (result === 'granted') {
+      await initDeviceNotifications({ subscribeIfGranted: true });
     }
+    return {
+      permission: result,
+      opened: result !== 'default',
+      method: 'prompt',
+    };
   }
 
-  if (perm !== 'denied') {
-    return ensureNotificationPermission();
+  const p = getNotificationPlatform();
+  let opened = false;
+  let method = 'instructions';
+
+  try {
+    if (p.isIOS && p.standalone) {
+      window.location.href = 'app-settings:';
+      opened = true;
+      method = 'app-settings';
+    } else if (p.isAndroid) {
+      const pkg = p.isFirefox
+        ? 'org.mozilla.firefox'
+        : p.isEdge
+          ? 'com.microsoft.emmx'
+          : 'com.android.chrome';
+      clickProtocolLink(
+        `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=${pkg};end`,
+      );
+      opened = true;
+      method = 'android-intent';
+    } else if (p.isWin) {
+      clickProtocolLink('ms-settings:notifications');
+      opened = true;
+      method = 'ms-settings';
+    }
+  } catch {
+    opened = false;
+    method = 'instructions';
   }
-  return perm;
+
+  return {
+    permission: notificationPermission(),
+    opened,
+    method,
+  };
 }
 
 export async function registerNotificationWorker() {
@@ -331,8 +396,8 @@ function notificationOptions({ body, tag, url, rideId, requireInteraction = true
   return {
     body: body || '',
     tag: tag || 'schoolrun-ride',
-    icon: '/favicon.svg',
-    badge: '/favicon.svg',
+    icon: '/product-logo.png',
+    badge: '/product-logo.png',
     vibrate: [200, 80, 200, 80, 400],
     renotify: true,
     requireInteraction,
