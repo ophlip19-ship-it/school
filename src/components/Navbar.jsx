@@ -1,31 +1,31 @@
 import { useAuth } from '../context/AuthContext';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, MapPin, User, Car, History, LayoutDashboard } from 'lucide-react';
+import {
+  Home,
+  MapPin,
+  User,
+  Car,
+  History,
+  LayoutDashboard,
+  Route,
+} from 'lucide-react';
 
 const HIDDEN_PATHS = ['/', '/signup', '/verify', '/add-child', '/payment'];
 
 export default function Navbar() {
   const { user, isAuthenticated } = useAuth();
   const location = useLocation();
-
-  if (!isAuthenticated || HIDDEN_PATHS.includes(location.pathname)) {
-    return null;
-  }
-
-  // Hide nav on full-screen map / chat experiences
-  if (
+  const fullBleed =
     location.pathname === '/live-tracking' ||
     location.pathname === '/pick-locations' ||
     location.pathname === '/chat' ||
-    location.pathname === '/admin/transit'
-  ) {
-    return null;
-  }
+    location.pathname === '/admin/transit';
 
   const nav =
     user?.role === 'parent'
       ? [
           { label: 'Home', icon: Home, path: '/dashboard' },
+          { label: 'Active trips', icon: Route, path: '/active-trips' },
           { label: 'Track', icon: MapPin, path: '/live-tracking' },
           { label: 'History', icon: History, path: '/history' },
           { label: 'Profile', icon: User, path: '/profile' },
@@ -45,7 +45,11 @@ export default function Navbar() {
             ]
           : [];
 
-  if (nav.length === 0) return null;
+  const showNavigation =
+    isAuthenticated &&
+    nav.length > 0 &&
+    !HIDDEN_PATHS.includes(location.pathname) &&
+    !fullBleed;
 
   const linkClass = (active) =>
     `flex min-w-[64px] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition lg:min-w-0 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 ${
@@ -69,39 +73,50 @@ export default function Navbar() {
 
   return (
     <>
-      {/* Desktop / large tablet — top bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 hidden border-b border-slate-200 bg-white/95 backdrop-blur lg:block">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-6">
+      <header
+        className={`fixed top-0 left-0 right-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur ${
+          fullBleed ? 'pointer-events-none border-transparent bg-transparent' : ''
+        }`}
+      >
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
           <Link
             to={
-              user?.role === 'driver'
+              !isAuthenticated
+                ? '/'
+                : user?.role === 'driver'
                 ? '/driver'
                 : user?.role === 'admin'
                   ? '/admin'
                   : '/dashboard'
             }
-            className="flex items-center gap-2 font-bold text-slate-900"
+            aria-label="SchoolRun home"
+            className="pointer-events-auto flex shrink-0 items-center gap-2 font-bold text-slate-900"
           >
             <img
               src="/product-logo.png"
-              alt=""
-              className="h-8 w-8 rounded-lg object-cover"
+              alt="SchoolRun"
+              className="h-10 w-10 object-contain"
             />
-            <span>SchoolRun</span>
-            <span className="ml-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-              {user?.role || 'user'}
-            </span>
+            <span className="hidden sm:inline">SchoolRun</span>
+            {showNavigation && (
+              <span className="ml-1 hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 sm:inline">
+                {user?.role || 'user'}
+              </span>
+            )}
           </Link>
-          <nav className="flex items-center gap-1">{items}</nav>
+          {showNavigation && (
+            <nav className="hidden items-center gap-1 lg:flex">{items}</nav>
+          )}
         </div>
       </header>
 
-      {/* Mobile / tablet — bottom bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden safe-bottom">
-        <div className="mx-auto flex max-w-lg justify-around py-2 sm:max-w-2xl">
-          {items}
-        </div>
-      </nav>
+      {showNavigation && (
+        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden safe-bottom">
+          <div className="mx-auto flex max-w-lg justify-around py-2 sm:max-w-2xl">
+            {items}
+          </div>
+        </nav>
+      )}
     </>
   );
 }

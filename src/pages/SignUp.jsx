@@ -118,38 +118,72 @@ export default function SignUp() {
   };
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-md px-4 py-8 sm:px-6 sm:py-10 md:max-w-lg">
-      <Link to="/" className="text-sm font-medium text-emerald-600">
-        ← Back
-      </Link>
-      <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">
-        {mode === 'login' ? 'Welcome back' : 'Create account'}
-      </h1>
-      <p className="mt-2 text-slate-600">
-        {mode === 'login' ? 'Sign in to SchoolRun' : 'Join SchoolRun — powered by a live API'}
-      </p>
+    <div className="relative isolate mx-auto grid min-h-screen w-full max-w-7xl grid-cols-1 overflow-hidden bg-slate-50 lg:grid-cols-2">
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute left-[4%] top-[8%] h-12 w-12 -rotate-12 rounded-xl object-cover opacity-[0.12] sm:h-16 sm:w-16"
+        />
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute right-[7%] top-[18%] h-14 w-14 rotate-12 rounded-xl object-cover opacity-[0.10] sm:right-[12%] sm:h-20 sm:w-20"
+        />
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute left-[12%] top-[38%] h-10 w-10 rotate-6 rounded-lg object-cover opacity-[0.11] sm:left-[6%] sm:h-14 sm:w-14"
+        />
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute right-[5%] top-[52%] h-12 w-12 -rotate-6 rounded-xl object-cover opacity-[0.12] sm:right-[8%] sm:h-16 sm:w-16"
+        />
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute bottom-[22%] left-[5%] h-14 w-14 rotate-12 rounded-xl object-cover opacity-[0.10] sm:bottom-[18%] sm:left-[14%] sm:h-20 sm:w-20"
+        />
+        <img
+          src="/product-logo.png"
+          alt=""
+          className="absolute bottom-[7%] right-[9%] h-10 w-10 -rotate-12 rounded-lg object-cover opacity-[0.11] sm:h-14 sm:w-14"
+        />
+      </div>
+      <section className="relative z-10 px-4 py-8 sm:px-6 sm:py-10 lg:px-12 lg:py-14">
+        <div className="mx-auto w-full max-w-lg">
+          <Link to="/" className="text-sm font-medium text-emerald-600">
+            ← Back
+          </Link>
+          <h1 className="mt-4 text-2xl font-bold text-slate-900 sm:text-3xl">
+            {mode === 'login' ? 'Welcome back' : 'Create account'}
+          </h1>
+          <p className="mt-2 text-slate-600">
+            {mode === 'login' ? 'Sign in to SchoolRun' : 'Join SchoolRun — powered by a live API'}
+          </p>
 
-      {mode === 'register' && (
-        <div className="mt-6 grid grid-cols-3 gap-2">
-          {ROLES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => setRole(r.id)}
-              className={`rounded-2xl border p-3 text-left transition ${
-                role === r.id
-                  ? 'border-emerald-600 bg-emerald-50 ring-2 ring-emerald-600/20'
-                  : 'border-slate-200 bg-white hover:border-slate-300'
-              }`}
-            >
-              <p className="text-sm font-semibold text-slate-900">{r.label}</p>
-              <p className="mt-1 text-[11px] text-slate-500">{r.hint}</p>
-            </button>
-          ))}
-        </div>
-      )}
+          {mode === 'register' && (
+            <div className="mt-6 grid grid-cols-3 gap-2">
+              {ROLES.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setRole(r.id)}
+                  className={`rounded-2xl border p-3 text-left transition ${
+                    role === r.id
+                      ? 'border-emerald-600 bg-emerald-50 ring-2 ring-emerald-600/20'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">{r.label}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">{r.hint}</p>
+                </button>
+              ))}
+            </div>
+          )}
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+          <form onSubmit={handleSubmit} className="mt-8 space-y-4">
         {mode === 'register' && (
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">Full name</label>
@@ -259,9 +293,9 @@ export default function SignUp() {
         >
           {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Continue'}
         </button>
-      </form>
+          </form>
 
-      <p className="mt-6 text-center text-sm text-slate-600">
+          <p className="mt-6 text-center text-sm text-slate-600">
         {mode === 'login' ? (
           <>
             New here?{' '}
@@ -277,13 +311,27 @@ export default function SignUp() {
             </Link>
           </>
         )}
-      </p>
+          </p>
 
-      
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-        <p className="font-semibold text-slate-800">Demo logins (password: password123)</p>
-        <p className="mt-1">parent@schoolrun.app · driver@schoolrun.app · admin@schoolrun.app</p>
-      </div>
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+            <p className="font-semibold text-slate-800">Demo logins (password: password123)</p>
+            <p className="mt-1">parent@schoolrun.app · driver@schoolrun.app · admin@schoolrun.app</p>
+          </div>
+        </div>
+      </section>
+      <aside className="relative z-10 hidden min-h-full items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-500 p-10 lg:flex">
+        <div className="flex max-w-xl flex-col items-center text-center text-white">
+          <img
+            src="/product-logo.png"
+            alt="SchoolRun"
+            className="w-full max-w-md rounded-[2rem] object-cover shadow-2xl shadow-emerald-950/30"
+          />
+          <p className="mt-8 text-2xl font-bold">Safe rides start here.</p>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-emerald-50">
+            Trusted school transport for parents, drivers, and schools.
+          </p>
+        </div>
+      </aside>
     </div>
   );
 }

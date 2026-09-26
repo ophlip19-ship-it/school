@@ -1,23 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  MapPin,
   AlertCircle,
-  Plus,
   ChevronRight,
   History,
   User,
-  MessageSquare,
   Zap,
   Car,
-  Star,
   Shield,
-  Camera,
   Home,
   Navigation,
   School,
   Map,
   ArrowUpDown,
+  Route,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ridesApi, driversApi, formatMoney } from '../lib/api';
@@ -33,7 +29,6 @@ import {
 import { quoteTripFare } from '../lib/pricing';
 import { tripTypeFromModes, tripTypeHint } from '../lib/trip';
 import {
-  childForRide,
   isTrackableStatus,
   rideForChild,
   tripStatusLabel,
@@ -161,124 +156,192 @@ function SecondaryPanel({
   );
 }
 
-/** Parent can cancel only before a driver accepts */
-const canParentCancel = (status) =>
-  ['pending_payment', 'open', 'requested'].includes(status);
-
-function rideTone(status) {
-  if (status === 'requested') {
-    return 'from-amber-500 to-orange-500 shadow-amber-500/20';
-  }
-  if (status === 'open' || status === 'pending_payment') {
-    return 'from-blue-600 to-indigo-500 shadow-blue-600/20';
-  }
-  return 'from-emerald-600 to-teal-500 shadow-emerald-600/20';
-}
-
-function rideSummary(ride) {
-  if (ride.status === 'requested') {
-    return ride.driverName
-      ? `Waiting · ${ride.driverName}`
-      : 'Waiting for driver';
-  }
-  if (ride.status === 'open') return 'Finding a driver';
-  if (ride.status === 'pending_payment') return 'Payment needed';
-  return ride.driverName || 'Waiting for driver';
-}
-
-function ActiveRideCard({
-  ride,
-  child,
-  onCancel,
-  cancelling,
-  onSelect,
-  featured = false,
+function DashboardMenu({
+  drivers,
+  availableDrivers,
+  selectedDriver,
+  assignMode,
+  setAssignMode,
+  setSelectedDriverId,
+  childProfiles,
+  activeRides,
+  selectedChildId,
+  setSelectedChildId,
+  onClose,
 }) {
-  const showCancel = canParentCancel(ride.status);
-  const trackable = isTrackableStatus(ride.status);
-  const showPin =
-    ride.paymentStatus === 'paid' &&
-    ['assigned', 'in_transit'].includes(ride.status) &&
-    ride.handoverPin;
-
   return (
-    <article
-      className={`flex h-full min-h-0 flex-col rounded-2xl bg-gradient-to-br p-3 text-white shadow-md ${rideTone(
-        ride.status,
-      )} ${featured ? 'sm:p-3.5' : ''}`}
-    >
-      <button
-        type="button"
-        onClick={() => onSelect?.(ride)}
-        className="flex min-w-0 items-start gap-2.5 text-left"
-      >
-        <ChildAvatar child={child || { name: ride.childName }} size="sm" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="truncate text-sm font-bold leading-tight sm:text-[15px]">
-              {ride.childName}
-            </h3>
-            <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-              {tripStatusLabel(ride.status)}
+    <nav aria-label="Dashboard menu">
+      <ul className="space-y-2">
+        <li>
+          <Link
+            to="/active-trips"
+            onClick={onClose}
+            className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-3 font-semibold text-emerald-800"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Route size={18} /> Active trips
+            </span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs">
+              {activeRides.length}
+            </span>
+          </Link>
+        </li>
+        <li>
+          <Link
+            to="/select-children"
+            onClick={onClose}
+            className="block rounded-xl px-3 py-3 font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Schedule a ride
+          </Link>
+        </li>
+        <li>
+          <Link
+            to="/history"
+            onClick={onClose}
+            className="block rounded-xl px-3 py-3 font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Ride history
+          </Link>
+        </li>
+        <li>
+          <Link
+            to="/profile"
+            onClick={onClose}
+            className="block rounded-xl px-3 py-3 font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Profile
+          </Link>
+        </li>
+
+        <li className="border-t border-slate-100 pt-3">
+          <div className="flex items-center justify-between px-3">
+            <h3 className="font-semibold text-slate-900">Active drivers</h3>
+            <span className="text-xs font-medium text-emerald-700">
+              {availableDrivers.length} available
             </span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-white/85">
-            {rideSummary(ride)}
-            {ride.time ? ` · ${ride.time}` : ''}
-          </p>
-        </div>
-      </button>
+          <ul className="mt-2 space-y-1">
+            {drivers.slice(0, 6).map((driver) => {
+              const selected =
+                assignMode === 'choose' &&
+                selectedDriver?.id === driver.id &&
+                driver.available;
+              return (
+                <li key={driver.id}>
+                  <button
+                    type="button"
+                    disabled={!driver.available}
+                    onClick={() => {
+                      setAssignMode('choose');
+                      setSelectedDriverId(driver.id);
+                      onClose();
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                      selected
+                        ? 'bg-emerald-50 text-emerald-900'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    } ${driver.available ? '' : 'cursor-not-allowed opacity-60'}`}
+                  >
+                    <Car size={17} className="shrink-0 text-slate-500" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {driver.name}
+                        {driver.verified ? ' · Verified' : ''}
+                      </span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {driver.vehiclePlate || 'No plate'} · ★ {driver.rating}
+                      </span>
+                    </span>
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${
+                        driver.available ? 'text-emerald-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {driver.available ? 'Available' : 'On trip'}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {drivers.length === 0 && (
+              <li className="px-3 py-2 text-sm text-slate-500">
+                No drivers online right now.
+              </li>
+            )}
+          </ul>
+        </li>
 
-      {featured && ride.pickup ? (
-        <p className="mt-2 flex items-center gap-1.5 truncate text-xs text-white/80">
-          <MapPin size={12} className="shrink-0" />
-          <span className="truncate">{ride.pickup}</span>
-        </p>
-      ) : null}
-
-      {showPin ? (
-        <p className="mt-2 inline-flex w-fit items-center rounded-md bg-white/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide">
-          PIN {ride.handoverPin}
-        </p>
-      ) : null}
-
-      <div className="mt-auto flex flex-wrap gap-1.5 pt-2.5">
-        {trackable && (
-          <Link
-            to={`/live-tracking?rideId=${ride.id}`}
-            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
-          >
-            Track
-          </Link>
-        )}
-        {ride.driverId && trackable && (
-          <Link
-            to={`/chat?rideId=${ride.id}`}
-            className="inline-flex items-center gap-1 rounded-lg bg-white/15 px-2.5 py-1.5 text-xs font-semibold"
-          >
-            <MessageSquare size={12} /> Chat
-          </Link>
-        )}
-        {ride.paymentStatus !== 'paid' && ride.status !== 'cancelled' && (
-          <Link
-            to={`/payment?rideId=${ride.id}`}
-            className="rounded-lg bg-amber-400 px-2.5 py-1.5 text-xs font-semibold text-amber-950"
-          >
-            Pay
-          </Link>
-        )}
-        {showCancel && (
-          <button
-            type="button"
-            disabled={cancelling}
-            onClick={() => onCancel?.(ride)}
-            className="rounded-lg border border-white/35 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {cancelling ? 'Cancelling…' : 'Cancel'}
-          </button>
-        )}
-      </div>
-    </article>
+        <li className="border-t border-slate-100 pt-3">
+          <div className="flex items-center justify-between px-3">
+            <h3 className="font-semibold text-slate-900">Children</h3>
+            <Link
+              to="/add-child"
+              onClick={onClose}
+              className="text-xs font-semibold text-emerald-700 hover:underline"
+            >
+              + Add
+            </Link>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {childProfiles.map((child) => {
+              const trip = rideForChild(activeRides, child);
+              const selected = selectedChildId === child.id;
+              return (
+                <li
+                  key={child.id}
+                  className={`rounded-xl px-3 py-2 ${
+                    selected ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedChildId(child.id);
+                        onClose();
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    >
+                      <ChildAvatar child={child} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-slate-800">
+                          {child.name}
+                        </span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {trip ? tripStatusLabel(trip.status) : child.school || 'No school set'}
+                        </span>
+                      </span>
+                    </button>
+                    <Link
+                      to={`/add-child?id=${child.id}`}
+                      onClick={onClose}
+                      className="shrink-0 text-xs font-medium text-emerald-700 hover:underline"
+                    >
+                      Edit
+                    </Link>
+                  </div>
+                  {trip && isTrackableStatus(trip.status) && (
+                    <Link
+                      to={`/live-tracking?rideId=${trip.id}`}
+                      onClick={onClose}
+                      className="ml-10 mt-1 inline-block text-xs font-semibold text-emerald-700 hover:underline"
+                    >
+                      Track ride
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+            {childProfiles.length === 0 && (
+              <li className="px-3 py-2 text-sm text-slate-500">
+                No children added yet.
+              </li>
+            )}
+          </ul>
+        </li>
+      </ul>
+    </nav>
   );
 }
 
@@ -300,14 +363,10 @@ export default function HomeDashboard() {
   const [customPickupPlace, setCustomPickupPlace] = useState(null);
   const [customDropoff, setCustomDropoff] = useState('');
   const [customDropoffPlace, setCustomDropoffPlace] = useState(null);
-  const [routePickup, setRoutePickup] = useState(null);
-  const [routeDropoff, setRouteDropoff] = useState(null);
   const [fareQuote, setFareQuote] = useState(null);
   const [fareLoading, setFareLoading] = useState(false);
   const [schoolDestError, setSchoolDestError] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [cancellingId, setCancellingId] = useState(null);
-  const [cancelError, setCancelError] = useState('');
 
   const children = user?.children || [];
 
@@ -367,8 +426,6 @@ export default function HomeDashboard() {
     setCustomDropoff(customPickup);
     setCustomPickupPlace(customDropoffPlace);
     setCustomDropoffPlace(customPickupPlace);
-    setRoutePickup(routeDropoff);
-    setRouteDropoff(routePickup);
   };
 
   // Rank free drivers by distance to pickup whenever locations change
@@ -428,15 +485,11 @@ export default function HomeDashboard() {
     let cancelled = false;
     const run = async () => {
       if (!selectedChild) {
-        setRoutePickup(null);
-        setRouteDropoff(null);
         setFareQuote(null);
         setSchoolDestError('');
         return;
       }
       if (usesSchool && !childHasSchool(selectedChild)) {
-        setRoutePickup(null);
-        setRouteDropoff(null);
         setFareQuote(null);
         setSchoolDestError(
           'This child has no school yet. Add a school address on the child profile.',
@@ -448,7 +501,6 @@ export default function HomeDashboard() {
         !customPickupPlace &&
         !customPickup.trim()
       ) {
-        setRoutePickup(null);
         setFareQuote(null);
         setSchoolDestError('');
         return;
@@ -458,7 +510,6 @@ export default function HomeDashboard() {
         !customDropoffPlace &&
         !customDropoff.trim()
       ) {
-        setRouteDropoff(null);
         setFareQuote(null);
         setSchoolDestError('');
         return;
@@ -481,14 +532,11 @@ export default function HomeDashboard() {
           customCoords: customDropoffPlace,
         });
         if (cancelled) return;
-        setRoutePickup(from);
-        setRouteDropoff(to);
         const quote = await quoteTripFare(from, to);
         if (cancelled) return;
         setFareQuote(quote);
       } catch (err) {
         if (!cancelled) {
-          setRouteDropoff(null);
           setFareQuote(null);
           setSchoolDestError(
             err.message ||
@@ -532,8 +580,6 @@ export default function HomeDashboard() {
       children.find((c) => c.id === childId),
     );
 
-  const focusedChildTrip = rideForChild(activeRides, selectedChild);
-
   const selectTripOnMap = (ride) => {
     const child = children.find(
       (c) =>
@@ -541,43 +587,6 @@ export default function HomeDashboard() {
         (ride.childName && c.name === ride.childName),
     );
     if (child) setSelectedChildId(child.id);
-  };
-
-  const cancelRide = async (ride) => {
-    if (!ride?.id || cancellingId) return;
-    const label =
-      ride.status === 'pending_payment'
-        ? 'Cancel this unpaid trip?'
-        : 'Cancel this trip before a driver accepts?';
-    if (!window.confirm(label)) return;
-
-    setCancelError('');
-    setCancellingId(ride.id);
-    try {
-      await ridesApi.cancel(ride.id);
-      setActiveRides((prev) => prev.filter((r) => r.id !== ride.id));
-      // Refresh recent list so cancelled status shows in history
-      ridesApi
-        .list()
-        .then(({ rides: list }) => setRides(list.slice(0, 5)))
-        .catch(() => {});
-    } catch (err) {
-      setCancelError(err.message || 'Could not cancel trip');
-      // Ride may have been accepted in the meantime — refresh active list
-      ridesApi
-        .active()
-        .then((res) => {
-          const list = Array.isArray(res.rides)
-            ? res.rides
-            : res.ride
-              ? [res.ride]
-              : [];
-          setActiveRides(list.filter(Boolean));
-        })
-        .catch(() => {});
-    } finally {
-      setCancellingId(null);
-    }
   };
 
   const bookInstant = async () => {
@@ -679,11 +688,6 @@ export default function HomeDashboard() {
   return (
     <PageShell width="lg" className="md:pb-10">
       <div className="mb-6 flex items-start gap-3 sm:mb-8">
-        <HamburgerButton
-          open={drawerOpen}
-          onClick={() => setDrawerOpen((v) => !v)}
-          className="mt-0.5"
-        />
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
             Welcome back, {user?.name || user?.parentName || 'Parent'}
@@ -692,9 +696,6 @@ export default function HomeDashboard() {
             {availableDrivers.length > 0
               ? `${availableDrivers.length} driver${availableDrivers.length === 1 ? '' : 's'} ready nearby`
               : 'Book a ride for your child'}
-            {activeRides.length > 0
-              ? ` · ${activeRides.length} active trip${activeRides.length === 1 ? '' : 's'}`
-              : ''}
           </p>
           {user?.homeAddress ? (
             <p className="mt-1 flex items-start gap-1.5 text-sm text-slate-500">
@@ -703,88 +704,41 @@ export default function HomeDashboard() {
             </p>
           ) : null}
         </div>
+        <HamburgerButton
+          open={drawerOpen}
+          onClick={() => setDrawerOpen((v) => !v)}
+          className="mt-0.5"
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-10">
         {/* Primary column */}
         <div className="space-y-8 lg:col-span-3">
-          {activeRides.length > 0 ? (
-          <div className="space-y-5">
-            <section>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">
-                  Active trips
-                  <span className="ml-2 text-sm font-semibold text-slate-400">
-                    {activeRides.length}
-                  </span>
-                </h2>
-                <p className="text-xs font-medium text-slate-500">
-                  Tap a child to focus the map
-                </p>
-              </div>
-              {cancelError && (
-                <ErrorBanner
-                  title="Couldn’t cancel trip"
-                  message={cancelError}
-                  onDismiss={() => setCancelError('')}
-                  className="mb-3"
-                />
-              )}
-              <div
-                className={
-                  activeRides.length === 1
-                    ? 'grid grid-cols-1'
-                    : 'trips-bento'
-                }
-                data-count={activeRides.length}
-              >
-                {activeRides.map((ride, index) => (
-                  <ActiveRideCard
-                    key={ride.id}
-                    ride={ride}
-                    child={childForRide(children, ride)}
-                    onCancel={cancelRide}
-                    cancelling={cancellingId === ride.id}
-                    onSelect={selectTripOnMap}
-                    featured={
-                      activeRides.length === 1 ||
-                      ([3, 5, 7].includes(activeRides.length) && index === 0)
-                    }
-                  />
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          {activeRides.length > 0 && (
+            <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900">Family map</h2>
+                  <h2 className="text-lg font-bold text-slate-900">Family map</h2>
                   <p className="mt-0.5 text-sm text-slate-500">
-                    Tracking {activeRides.length} active trip
-                    {activeRides.length === 1 ? '' : 's'} — tap a child to focus
+                    {activeRides.length} active trip{activeRides.length === 1 ? '' : 's'}
                   </p>
                 </div>
-                {focusedChildTrip && isTrackableStatus(focusedChildTrip.status) ? (
-                  <Link
-                    to={`/live-tracking?rideId=${focusedChildTrip.id}`}
-                    className="text-sm font-semibold text-emerald-700 hover:underline"
-                  >
-                    Open live tracking
-                  </Link>
-                ) : null}
+                <Link
+                  to="/active-trips"
+                  className="shrink-0 text-sm font-semibold text-emerald-700 hover:underline"
+                >
+                  View trips
+                </Link>
               </div>
               <TripRouteMap
-                pickup={routePickup}
-                dropoff={routeDropoff}
                 trips={activeRides}
-                children={children}
+                childProfiles={children}
                 focusChildId={selectedChildId}
                 onSelectTrip={selectTripOnMap}
                 className="h-64 sm:h-80"
               />
             </section>
-          </div>
-          ) : null}
+          )}
 
           {/* Instant ride */}
           <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 p-5 text-white shadow-lg sm:p-6">
@@ -1246,181 +1200,6 @@ export default function HomeDashboard() {
             </Link>
           </div>
 
-          {/* Active drivers */}
-          <div>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-xl font-bold text-slate-900">
-                Active drivers
-              </h2>
-              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                {availableDrivers.length} available
-              </span>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              {drivers.slice(0, 6).map((driver) => {
-                const selected =
-                  assignMode === 'choose' &&
-                  selectedDriver?.id === driver.id &&
-                  driver.available;
-                return (
-                  <button
-                    key={driver.id}
-                    type="button"
-                    disabled={!driver.available}
-                    onClick={() => {
-                      if (driver.available) {
-                        setAssignMode('choose');
-                        setSelectedDriverId(driver.id);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-2xl border bg-white p-4 text-left shadow-sm transition ${
-                      selected
-                        ? 'border-emerald-500 ring-2 ring-emerald-500/20'
-                        : driver.available
-                          ? 'border-slate-200 hover:border-emerald-400'
-                          : 'cursor-not-allowed border-slate-200 opacity-70'
-                    }`}
-                  >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-xl">
-                      🚗
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate font-semibold text-slate-900">
-                          {driver.name}
-                        </h3>
-                        {driver.verified && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                            <Shield size={10} /> Verified
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-1 text-sm text-slate-500">
-                        <Car size={14} />
-                        <span className="font-mono text-slate-700">
-                          {driver.vehiclePlate || '—'}
-                        </span>
-                        <span className="mx-1">·</span>
-                        <Star
-                          size={12}
-                          className="fill-amber-400 text-amber-400"
-                        />
-                        {driver.rating}
-                      </p>
-                      {driver.available && (
-                        <p className="mt-1 text-xs font-medium text-emerald-700">
-                          {selected
-                            ? 'Selected for instant ride'
-                            : 'Tap to select for instant ride'}
-                        </p>
-                      )}
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        driver.available
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-amber-50 text-amber-700'
-                      }`}
-                    >
-                      {driver.available ? 'Available' : 'On trip'}
-                    </span>
-                  </button>
-                );
-              })}
-              {drivers.length === 0 && (
-                <p className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-sm text-slate-500 sm:col-span-2">
-                  No drivers online right now. Check back soon or schedule a
-                  ride for later.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Children */}
-          <div>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-xl font-bold text-slate-900">
-                Your children
-                {children.length > 0 ? (
-                  <span className="ml-2 text-base font-semibold text-slate-400">
-                    ({children.length})
-                  </span>
-                ) : null}
-              </h2>
-              <Link
-                to="/add-child"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white"
-              >
-                <Plus size={16} /> Add child
-              </Link>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              {children.map((child) => {
-                const trip = rideForChild(activeRides, child);
-                const selected = selectedChildId === child.id;
-                return (
-                  <div
-                    key={child.id}
-                    className={`flex items-center gap-3 rounded-2xl border bg-white p-4 shadow-sm ${
-                      selected
-                        ? 'border-emerald-500 ring-2 ring-emerald-500/15'
-                        : 'border-slate-200'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setSelectedChildId(child.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    >
-                      <ChildAvatar child={child} size="lg" />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-slate-900">
-                          {child.name}
-                        </h3>
-                        {trip ? (
-                          <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                            <span
-                              className={`h-1.5 w-1.5 rounded-full ${
-                                trip.status === 'in_transit'
-                                  ? 'bg-emerald-500'
-                                  : 'bg-amber-400'
-                              }`}
-                            />
-                            {tripStatusLabel(trip.status)}
-                          </p>
-                        ) : null}
-                      </div>
-                    </button>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      {trip && isTrackableStatus(trip.status) ? (
-                        <Link
-                          to={`/live-tracking?rideId=${trip.id}`}
-                          className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                        >
-                          Track
-                        </Link>
-                      ) : null}
-                      
-                    </div>
-                  </div>
-                );
-              })}
-              {children.length === 0 && (
-                <p className="text-sm text-slate-500">
-                  No children yet — add one or more to book rides.
-                </p>
-              )}
-              {children.length > 0 && (
-                <Link
-                  to="/add-child"
-                  className="block rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/50 py-3 text-center text-sm font-semibold text-emerald-700 hover:bg-emerald-50 sm:col-span-2 lg:col-span-1"
-                >
-                  + Add another child
-                </Link>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Desktop secondary column — recent rides & shortcuts */}
@@ -1438,12 +1217,18 @@ export default function HomeDashboard() {
         onClose={() => setDrawerOpen(false)}
         title="Activity & shortcuts"
       >
-        <SecondaryPanel
-          {...secondaryProps}
-          bookInstant={() => {
-            setDrawerOpen(false);
-            bookInstant();
-          }}
+        <DashboardMenu
+          drivers={drivers}
+          availableDrivers={availableDrivers}
+          selectedDriver={selectedDriver}
+          assignMode={assignMode}
+          setAssignMode={setAssignMode}
+          setSelectedDriverId={setSelectedDriverId}
+          childProfiles={children}
+          activeRides={activeRides}
+          selectedChildId={selectedChildId}
+          setSelectedChildId={setSelectedChildId}
+          onClose={() => setDrawerOpen(false)}
         />
       </DashboardDrawer>
     </PageShell>

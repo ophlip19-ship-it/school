@@ -57,7 +57,7 @@ export default function TripRouteMap({
   dropoff,
   className = 'h-48',
   trips = [],
-  children = [],
+  childProfiles = [],
   focusChildId = null,
   onSelectTrip,
 }) {
@@ -88,7 +88,7 @@ export default function TripRouteMap({
   );
 
   const focusChild =
-    (children || []).find((c) => String(c.id) === String(focusChildId)) || null;
+    (childProfiles || []).find((c) => String(c.id) === String(focusChildId)) || null;
   const focusedTrip = rideForChild(liveTrips, focusChild) || null;
 
   const from = focusedTrip?.pickupCoords
@@ -263,7 +263,7 @@ export default function TripRouteMap({
     liveTrips.forEach((ride) => {
       const id = String(ride.id);
       keep.add(id);
-      const child = childForRide(children, ride);
+      const child = childForRide(childProfiles, ride);
       const pos = tripPosition(ride);
       if (!pos) return;
       const focused = focusedTrip && String(focusedTrip.id) === id;
@@ -353,7 +353,7 @@ export default function TripRouteMap({
   }, [
     ready,
     liveTrips,
-    children,
+    childProfiles,
     focusedTrip,
     tripIds,
     from,
@@ -495,7 +495,7 @@ export default function TripRouteMap({
 
   if (!from && !to && liveTrips.length === 0) return null;
 
-  const focusedChild = childForRide(children, focusedTrip);
+  const focusedChild = childForRide(childProfiles, focusedTrip);
   const focusedLive = canSeeLiveLocation(focusedTrip);
   const focusedName = focusedChild?.name || focusedTrip?.childName || '';
 
@@ -535,7 +535,7 @@ export default function TripRouteMap({
       {liveTrips.length > 0 ? (
         <div className="absolute inset-x-2 bottom-2 z-10 flex gap-1.5 overflow-x-auto pb-0.5">
           {liveTrips.map((ride) => {
-            const child = childForRide(children, ride);
+            const child = childForRide(childProfiles, ride);
             const selected = focusedTrip && String(focusedTrip.id) === String(ride.id);
             const live = canSeeLiveLocation(ride);
             return (

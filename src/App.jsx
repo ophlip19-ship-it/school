@@ -27,6 +27,7 @@ import SignUp from './pages/SignUp';
 import VerifyAccount from './pages/VerifyAccount';
 import AddChildProfile from './pages/AddChildProfile';
 import HomeDashboard from './pages/HomeDashboard';
+import ActiveTrips from './pages/ActiveTrips';
 import SelectChildren from './pages/SelectChildren';
 import PickLocations from './pages/PickLocations';
 import DateSchedule from './pages/dateSchedule';
@@ -107,13 +108,17 @@ function AppShell({ children }) {
   const { isAuthenticated } = useAuth();
   const { pathname } = useLocation();
   const showNav = isAuthenticated && !NAV_HIDDEN.has(pathname);
+  const fullBleed = [
+    '/live-tracking',
+    '/pick-locations',
+    '/chat',
+    '/admin/transit',
+  ].includes(pathname);
 
   return (
     <div
-      className={`min-h-screen bg-slate-50 ${
-        showNav
-          ? 'pb-24 lg:pb-0 lg:pt-14'
-          : 'pb-0 pt-0'
+      className={`min-h-screen bg-slate-50 ${fullBleed ? '' : 'pt-14'} ${
+        showNav ? 'pb-24 lg:pb-0' : ''
       }`}
     >
       {children}
@@ -149,6 +154,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute roles={['parent']}>
               <HomeDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/active-trips"
+          element={
+            <ProtectedRoute roles={['parent']}>
+              <ActiveTrips />
             </ProtectedRoute>
           }
         />
