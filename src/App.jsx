@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import DashboardMenuProvider from './components/DashboardMenuProvider';
 import RideReminders from './components/RideReminders';
 
 const NAV_HIDDEN = new Set([
@@ -114,10 +115,11 @@ function AppShell({ children }) {
     '/chat',
     '/admin/transit',
   ].includes(pathname);
-
   return (
     <div
-      className={`min-h-screen bg-slate-50 ${fullBleed ? '' : 'pt-14'} ${
+      className={`min-h-screen bg-slate-50 ${
+        fullBleed ? '' : 'pt-14'
+      } ${
         showNav ? 'pb-24 lg:pb-0' : ''
       }`}
     >
@@ -308,9 +310,11 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <AppRoutes />
-        <RideReminders />
-        <Navbar />
+        <DashboardMenuProvider>
+          <AppRoutes />
+          <RideReminders />
+          <Navbar />
+        </DashboardMenuProvider>
       </Router>
     </AuthProvider>
   );

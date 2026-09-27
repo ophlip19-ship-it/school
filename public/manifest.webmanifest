@@ -9,8 +9,14 @@
   "theme_color": "#059669",
   "icons": [
     {
-      "src": "/product-logo.png",
-      "sizes": "any",
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     }

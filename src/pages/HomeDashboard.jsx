@@ -34,9 +34,8 @@ import {
   tripStatusLabel,
 } from '../lib/childTrips';
 import AddressSearchInput from '../components/AddressSearchInput';
-import DashboardDrawer, {
-  HamburgerButton,
-} from '../components/DashboardDrawer';
+import DashboardDrawer from '../components/DashboardDrawer';
+import { useDashboardMenu } from '../components/DashboardMenuContext';
 import { ErrorBanner } from '../components/ErrorState';
 import PageShell from '../components/PageShell';
 import TripRouteMap from '../components/TripRouteMap';
@@ -347,6 +346,7 @@ function DashboardMenu({
 
 export default function HomeDashboard() {
   const { user } = useAuth();
+  const { open: drawerOpen, setOpen: setDrawerOpen } = useDashboardMenu();
   const navigate = useNavigate();
   const [activeRides, setActiveRides] = useState([]);
   const [rides, setRides] = useState([]);
@@ -366,7 +366,6 @@ export default function HomeDashboard() {
   const [fareQuote, setFareQuote] = useState(null);
   const [fareLoading, setFareLoading] = useState(false);
   const [schoolDestError, setSchoolDestError] = useState('');
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const children = user?.children || [];
 
@@ -686,29 +685,22 @@ export default function HomeDashboard() {
   };
 
   return (
-    <PageShell width="lg" className="md:pb-10">
-      <div className="mb-6 flex items-start gap-3 sm:mb-8">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+    <PageShell width="lg" className="pb-2  md:pb-6 lg:pb-5">
+      <div className="mb-6 text-left sm:mb-8">
+          <h1 className="text-xl font-bold text-slate-900 sm:text-3xl">
             Welcome back, {user?.name || user?.parentName || 'Parent'}
           </h1>
-          <p className="mt-2 text-slate-600">
+          <p className="mt-1 text-sm text-slate-600 sm:mt-2">
             {availableDrivers.length > 0
               ? `${availableDrivers.length} driver${availableDrivers.length === 1 ? '' : 's'} ready nearby`
               : 'Book a ride for your child'}
           </p>
           {user?.homeAddress ? (
-            <p className="mt-1 flex items-start gap-1.5 text-sm text-slate-500">
+            <p className="mt-1 flex items-start justify-left gap-1.5 text-sm text-slate-500">
               <Home size={14} className="mt-0.5 shrink-0" />
-              <span className="line-clamp-2">{user.homeAddress}</span>
+              <span className="line-clamp-1">{user.homeAddress}</span>
             </p>
           ) : null}
-        </div>
-        <HamburgerButton
-          open={drawerOpen}
-          onClick={() => setDrawerOpen((v) => !v)}
-          className="mt-0.5"
-        />
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-10">

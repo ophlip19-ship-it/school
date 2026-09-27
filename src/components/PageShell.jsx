@@ -23,7 +23,7 @@ export default function PageShell({
   const max = WIDTH[width] || WIDTH.md;
   return (
     <Tag
-      className={`mx-auto w-full ${max} px-4 py-6 sm:px-6 pb-28 md:pb-32 lg:pb-12 ${className}`}
+      className={`mx-auto w-full ${max} px-4 py-6 sm:px-6 pb-20 md:pb-24 lg:pb-8 ${className}`}
     >
       {children}
     </Tag>

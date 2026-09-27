@@ -9,12 +9,16 @@ import {
   LayoutDashboard,
   Route,
 } from 'lucide-react';
+import { HamburgerButton } from './DashboardDrawer';
+import { useDashboardMenu } from './DashboardMenuContext';
 
 const HIDDEN_PATHS = ['/', '/signup', '/verify', '/add-child', '/payment'];
 
 export default function Navbar() {
   const { user, isAuthenticated } = useAuth();
   const location = useLocation();
+  const { open: dashboardMenuOpen, setOpen: setDashboardMenuOpen } =
+    useDashboardMenu();
   const fullBleed =
     location.pathname === '/live-tracking' ||
     location.pathname === '/pick-locations' ||
@@ -50,6 +54,7 @@ export default function Navbar() {
     nav.length > 0 &&
     !HIDDEN_PATHS.includes(location.pathname) &&
     !fullBleed;
+  const showDashboardMenu = isAuthenticated && location.pathname === '/dashboard';
 
   const linkClass = (active) =>
     `flex min-w-[64px] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition lg:min-w-0 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 ${
@@ -74,45 +79,52 @@ export default function Navbar() {
   return (
     <>
       <header
-        className={`fixed top-0 left-0 right-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur ${
+        className={`main-header fixed top-0 left-0 right-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur ${
           fullBleed ? 'pointer-events-none border-transparent bg-transparent' : ''
         }`}
       >
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <Link
-            to={
-              !isAuthenticated
-                ? '/'
-                : user?.role === 'driver'
-                ? '/driver'
-                : user?.role === 'admin'
-                  ? '/admin'
-                  : '/dashboard'
-            }
-            aria-label="SchoolRun home"
-            className="pointer-events-auto flex shrink-0 items-center gap-2 font-bold text-slate-900"
-          >
-            <img
-              src="/product-logo.png"
-              alt="SchoolRun"
-              className="h-10 w-10 object-contain"
-            />
-            <span className="hidden sm:inline">SchoolRun</span>
+        <div className="main-header-inner mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+            <Link
+              to={
+                !isAuthenticated
+                  ? '/'
+                  : user?.role === 'driver'
+                    ? '/driver'
+                    : user?.role === 'admin'
+                      ? '/admin'
+                      : '/dashboard'
+              }
+              aria-label="SchoolRun home"
+              className="brand-link pointer-events-auto flex shrink-0 items-center gap-2 font-bold text-slate-900"
+            >
+              <img
+                src="/product-logo.png"
+                alt="SchoolRun"
+                className="brand-logo h-10 w-10 object-contain"
+              />
+              <span className="brand-name hidden sm:inline">SchoolRun</span>
+              {showNavigation && (
+                <span className="brand-role ml-1 hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 sm:inline">
+                  {user?.role || 'user'}
+                </span>
+              )}
+            </Link>
             {showNavigation && (
-              <span className="ml-1 hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 sm:inline">
-                {user?.role || 'user'}
-              </span>
+              <nav className="desktop-nav hidden items-center gap-1 lg:flex">{items}</nav>
             )}
-          </Link>
-          {showNavigation && (
-            <nav className="hidden items-center gap-1 lg:flex">{items}</nav>
-          )}
+            {showDashboardMenu && (
+              <HamburgerButton
+                open={dashboardMenuOpen}
+                onClick={() => setDashboardMenuOpen((current) => !current)}
+                className="dashboard-menu-button pointer-events-auto"
+              />
+            )}
         </div>
       </header>
 
       {showNavigation && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden safe-bottom">
-          <div className="mx-auto flex max-w-lg justify-around py-2 sm:max-w-2xl">
+        <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden safe-bottom">
+          <div className="mobile-bottom-nav-inner mx-auto flex max-w-lg justify-around py-2 sm:max-w-2xl">
             {items}
           </div>
         </nav>
