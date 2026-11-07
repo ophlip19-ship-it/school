@@ -1,3 +1,10 @@
+import {
+  geocodeV6Forward,
+  geocodeV6Reverse,
+  searchBoxForward,
+  searchBoxReverse,
+} from './mapSearch';
+
 /** Default anchors (Lagos) used when geolocation/geocoding is unavailable */
 export const DEFAULT_HOME = {
   label: 'Home · 12 Admiralty Way, Lekki',
@@ -71,17 +78,50 @@ export function formatEtaMinutes(minutes) {
   return rem ? `${h} h ${rem} min` : `${h} h`;
 }
 
+function trafficLabelFrom(congestion) {
+  if (!Array.isArray(congestion) || !congestion.length) return '';
+  if (congestion.some((level) => level === 'severe' || level === 'heavy')) {
+    return 'heavy traffic';
+  }
+  if (congestion.some((level) => level === 'moderate')) return 'moderate traffic';
+  return '';
+}
+
+function collectRouteAnnotations(route) {
+  const congestion = [];
+  let hasClosure = false;
+  for (const leg of route?.legs || []) {
+    const annotation = leg?.annotation;
+    if (Array.isArray(annotation?.congestion)) {
+      congestion.push(...annotation.congestion);
+    }
+    if (Array.isArray(annotation?.closure) && annotation.closure.some(Boolean)) {
+      hasClosure = true;
+    }
+  }
+  return { congestion, hasClosure };
+}
+
+async function requestDirections(profile, coords, params) {
+  const url = `https://api.mapbox.com/directions/v5/${profile}/${coords}?${new URLSearchParams(params)}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.routes?.[0] || null;
+}
+
 /**
  * Fetch a driving route from Mapbox Directions.
- * Returns road distance (km), ETA from km @ avg speed, geometry, and turn steps.
+ * Uses the traffic-aware profile, congestion coloring data, and curb arrival.
+ * ETA prefers live traffic duration and falls back to km ÷ average speed.
  *
  * @param {{lng:number,lat:number}|[number,number]} from
  * @param {{lng:number,lat:number}|[number,number]} to
- * @param {{ token?: string, steps?: boolean, profile?: string }} [options]
+ * @param {{ token?: string, steps?: boolean, profile?: string, bearing?: number, departAt?: string|Date }} [options]
  */
 export async function fetchDrivingRoute(from, to, options = {}) {
   const token = options.token || mapboxToken();
-  const profile = options.profile || 'mapbox/driving';
+  const profile = options.profile || 'mapbox/driving-traffic';
   const wantSteps = options.steps !== false;
 
   const normalize = (p) => {
@@ -113,6 +153,10 @@ export async function fetchDrivingRoute(from, to, options = {}) {
       },
       steps: [],
       nextStep: null,
+      congestion: [],
+      hasClosure: false,
+      trafficLabel: '',
+      nominalEtaMinutes: etaMin,
       source: 'haversine',
     };
   };
@@ -121,40 +165,83 @@ export async function fetchDrivingRoute(from, to, options = {}) {
 
   try {
     const coords = `${a.lng},${a.lat};${b.lng},${b.lat}`;
-    const params = new URLSearchParams({
+    const base = {
       geometries: 'geojson',
       overview: 'full',
       steps: wantSteps ? 'true' : 'false',
       access_token: token,
-    });
-    const url = `https://api.mapbox.com/directions/v5/${profile}/${coords}?${params}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const route = data.routes?.[0];
+    };
+    if (wantSteps) {
+      base.language = 'en';
+      base.banner_instructions = 'true';
+      base.roundabout_exits = 'true';
+    }
+    if (options.departAt) {
+      base.depart_at =
+        options.departAt instanceof Date
+          ? options.departAt.toISOString()
+          : String(options.departAt);
+    }
+    const bearing = Number(options.bearing);
+    if (Number.isFinite(bearing) && bearing > 0 && bearing < 360) {
+      base.bearings = `${Math.round(bearing)},45;`;
+    }
+
+    const attempts = [
+      [profile, { curb: true }],
+      [profile, { curb: false }],
+    ];
+    if (profile !== 'mapbox/driving') {
+      attempts.push(['mapbox/driving', { curb: false }]);
+    }
+
+    let route = null;
+    let usedProfile = profile;
+    for (const [attemptProfile, flags] of attempts) {
+      const params = { ...base };
+      const trafficProfile = String(attemptProfile).includes('driving-traffic');
+      params.annotations = trafficProfile
+        ? 'congestion,closure,duration,distance'
+        : 'duration,distance';
+      if (flags.curb) params.approaches = ';curb';
+      route = await requestDirections(attemptProfile, coords, params);
+      if (route) {
+        usedProfile = attemptProfile;
+        break;
+      }
+    }
     if (!route) return fallback();
 
     const distanceM = route.distance ?? 0;
     const distanceKm = distanceM / 1000;
-    const etaMinutes = etaMinutesFromKm(distanceKm);
+    const nominalEtaMinutes = etaMinutesFromKm(distanceKm);
+    const durationS = Number(route.duration);
+    const trafficEta = Number.isFinite(durationS) && durationS >= 0 ? durationS / 60 : null;
+    const etaMinutes = trafficEta != null ? trafficEta : nominalEtaMinutes;
+    const { congestion, hasClosure } = collectRouteAnnotations(route);
 
     const steps = [];
     for (const leg of route.legs || []) {
       for (const step of leg.steps || []) {
         const maneuver = step.maneuver || {};
+        const banner = Array.isArray(step.bannerInstructions)
+          ? step.bannerInstructions[0]
+          : null;
         steps.push({
           instruction:
             maneuver.instruction ||
+            banner?.primary?.text ||
             step.name ||
             (maneuver.type ? String(maneuver.type).replace(/_/g, ' ') : 'Continue'),
           type: maneuver.type || 'continue',
-          modifier: maneuver.modifier || null,
+          modifier: maneuver.modifier || banner?.primary?.modifier || null,
           distanceM: step.distance ?? 0,
           distanceKm: (step.distance ?? 0) / 1000,
           durationS: step.duration ?? 0,
           location: Array.isArray(maneuver.location)
             ? { lng: maneuver.location[0], lat: maneuver.location[1] }
             : null,
-          name: step.name || '',
+          name: step.name || banner?.primary?.text || '',
         });
       }
     }
@@ -168,12 +255,17 @@ export async function fetchDrivingRoute(from, to, options = {}) {
     return {
       distanceM,
       distanceKm,
-      durationS: route.duration ?? null,
-      /** ETA derived from road distance (km) ÷ average urban speed */
+      durationS: Number.isFinite(durationS) ? durationS : null,
+      /** Traffic duration when Directions returns one, else km ÷ average speed */
       etaMinutes,
+      nominalEtaMinutes,
       geometry: route.geometry,
       steps,
       nextStep,
+      congestion,
+      hasClosure,
+      trafficLabel: trafficLabelFrom(congestion),
+      profile: usedProfile,
       source: 'mapbox',
     };
   } catch {
@@ -264,43 +356,71 @@ export function watchPosition(onUpdate, onError) {
   return () => navigator.geolocation.clearWatch(id);
 }
 
+async function reverseGeocodeV5(lng, lat, token) {
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?limit=1&access_token=${token}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.features?.[0]?.place_name || null;
+}
+
+async function forwardGeocodeV5(query, token) {
+  const q = encodeURIComponent(query.trim());
+  const params = new URLSearchParams({
+    limit: '5',
+    country: 'ng',
+    proximity: `${DEFAULT_HOME.lng},${DEFAULT_HOME.lat}`,
+    types: 'address,poi,place,locality,neighborhood,district',
+    access_token: token,
+  });
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?${params}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const results = (data.features || [])
+    .filter((feat) => Array.isArray(feat.center))
+    .map((feat) => ({
+      lng: feat.center[0],
+      lat: feat.center[1],
+      label: feat.place_name,
+      name: feat.text || feat.place_name?.split(',')[0] || '',
+      featureType: feat.place_type?.[0] || '',
+      routable: false,
+    }));
+  return results.length ? results : null;
+}
+
 export async function reverseGeocode(lng, lat, token = mapboxToken()) {
-  if (!token) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  const fallback = `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+  if (!token) return fallback;
   try {
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?limit=1&access_token=${token}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    return data.features?.[0]?.place_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const fromSearch = await searchBoxReverse(lng, lat, token);
+    if (fromSearch?.label) return fromSearch.label;
+    const fromV6 = await geocodeV6Reverse(lng, lat, token);
+    if (fromV6) return fromV6;
+    return (await reverseGeocodeV5(lng, lat, token)) || fallback;
   } catch {
-    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    return fallback;
   }
 }
 
 export async function forwardGeocode(query, token = mapboxToken()) {
   if (!token || !query?.trim()) return null;
+  const proximity = `${DEFAULT_HOME.lng},${DEFAULT_HOME.lat}`;
   try {
-    const q = encodeURIComponent(query.trim());
-    const params = new URLSearchParams({
-      limit: '5',
-      country: 'ng',
-      proximity: `${DEFAULT_HOME.lng},${DEFAULT_HOME.lat}`,
-      types: 'address,poi,place,locality,neighborhood,district',
-      access_token: token,
-    });
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?${params}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const f = data.features?.[0];
-    if (!f?.center) return null;
+    let hits = await searchBoxForward(query, { token, proximity, limit: 5 });
+    if (!hits?.length) {
+      hits = await geocodeV6Forward(query, { token, proximity, limit: 5 });
+    }
+    if (!hits?.length) {
+      hits = await forwardGeocodeV5(query, token);
+    }
+    if (!hits?.length) return null;
     return {
-      lng: f.center[0],
-      lat: f.center[1],
-      label: f.place_name,
-      results: (data.features || []).map((feat) => ({
-        lng: feat.center[0],
-        lat: feat.center[1],
-        label: feat.place_name,
-      })),
+      lng: hits[0].lng,
+      lat: hits[0].lat,
+      label: hits[0].label,
+      results: hits,
     };
   } catch {
     return null;

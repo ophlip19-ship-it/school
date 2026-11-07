@@ -37,6 +37,11 @@ import {
   swapPlaces,
 } from "../lib/trip";
 import { attachMapGeocoder } from "../lib/mapGeocoder";
+import {
+  createSchoolRunMap,
+  drawTrafficRoute,
+  highlightBuilding,
+} from "../lib/mapStyle";
 import MapBottomDrawer from "../components/MapBottomDrawer";
 import AddressSearchInput from "../components/AddressSearchInput";
 
@@ -88,6 +93,7 @@ export default function PickLocations() {
   const dropoffMarker = useRef(null);
   const searchMarker = useRef(null);
   const geocoderCleanup = useRef(null);
+  const selectedBuilding = useRef(null);
 
   const initialModes =
     draft.pickupMode || draft.dropoffMode
@@ -183,17 +189,13 @@ export default function PickLocations() {
     }
     if (!mapContainer.current || map.current) return undefined;
 
-    mapboxgl.accessToken = token;
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: "mapbox://styles/mapbox/streets-v12",
+    map.current = createSchoolRunMap(mapContainer.current, {
+      accessToken: token,
       center: [DEFAULT_HOME.lng, DEFAULT_HOME.lat],
       zoom: 12.5,
+      pitch: 30,
+      showCompass: true,
     });
-    map.current.addControl(
-      new mapboxgl.NavigationControl({ showCompass: false }),
-      "top-right",
-    );
 
     map.current.on("load", () => {
       setMapReady(true);
@@ -234,6 +236,7 @@ export default function PickLocations() {
 
     // Tap map to set active pin
     map.current.on("click", async (e) => {
+      highlightBuilding(map.current, e.point, selectedBuilding);
       const { lng, lat } = e.lngLat;
       let label = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
       try {
@@ -380,32 +383,22 @@ export default function PickLocations() {
       });
       if (cancelled || !map.current) return;
       if (route?.geometry) {
-        const feature = { type: "Feature", geometry: route.geometry };
-        if (map.current.getSource("trip-route")) {
-          map.current.getSource("trip-route").setData(feature);
-        } else {
-          map.current.addSource("trip-route", {
-            type: "geojson",
-            data: feature,
-          });
-          map.current.addLayer({
-            id: "trip-route-line",
-            type: "line",
-            source: "trip-route",
-            layout: { "line-cap": "round", "line-join": "round" },
-            paint: {
-              "line-color": "#10b981",
-              "line-width": 4,
-              "line-opacity": 0.85,
-            },
-          });
-        }
+        drawTrafficRoute(map.current, "trip-route", route, {
+          color: "#10b981",
+          width: 5,
+          opacity: 0.9,
+        });
       }
       const quote = await quoteTripFare(pickupPlace, dropoffPlace);
       if (!cancelled) {
         setFareQuote(
           quote
-            ? { ...quote, etaMinutes: quote.etaMinutes ?? route?.etaMinutes }
+            ? {
+                ...quote,
+                etaMinutes: quote.etaMinutes ?? route?.etaMinutes,
+                trafficLabel: quote.trafficLabel || route?.trafficLabel || "",
+                hasClosure: !!(quote.hasClosure || route?.hasClosure),
+              }
             : null,
         );
       }
@@ -894,6 +887,8 @@ export default function PickLocations() {
               {fareQuote.etaMinutes != null
                 ? ` · ${formatEtaMinutes(fareQuote.etaMinutes)}`
                 : ""}
+              {fareQuote.trafficLabel ? ` · ${fareQuote.trafficLabel}` : ""}
+              {fareQuote.hasClosure ? " · road closure" : ""}
             </span>
             <span className="font-bold text-emerald-900">
               {formatMoney(fareQuote.fareCents)}

@@ -160,8 +160,7 @@ function DashboardMenu({
   availableDrivers,
   selectedDriver,
   assignMode,
-  setAssignMode,
-  setSelectedDriverId,
+  onSelectDriver,
   childProfiles,
   activeRides,
   selectedChildId,
@@ -232,8 +231,7 @@ function DashboardMenu({
                     type="button"
                     disabled={!driver.available}
                     onClick={() => {
-                      setAssignMode('choose');
-                      setSelectedDriverId(driver.id);
+                      onSelectDriver(driver.id);
                       onClose();
                     }}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
@@ -355,6 +353,8 @@ export default function HomeDashboard() {
   const [instantError, setInstantError] = useState('');
   const [selectedChildId, setSelectedChildId] = useState(null);
   const [selectedDriverId, setSelectedDriverId] = useState(null);
+  /** True while the available-driver list is open. Closes after a pick. */
+  const [driverPickerOpen, setDriverPickerOpen] = useState(false);
   /** choose = pick a driver · nearest = auto-assign closest free driver */
   const [assignMode, setAssignMode] = useState('nearest');
   const [pickupMode, setPickupMode] = useState('home'); // home | current | school | custom
@@ -454,7 +454,8 @@ export default function HomeDashboard() {
               if (prev && list.some((d) => d.id === prev && d.available)) {
                 return prev;
               }
-              return list.find((d) => d.available)?.id || null;
+              // Leave the choice empty so the parent picks from the list.
+              return null;
             });
           })
           .catch(() => {
@@ -569,9 +570,13 @@ export default function HomeDashboard() {
   // only if still marked available (server flags "On trip" drivers).
   const availableDrivers = drivers.filter((d) => d.available);
   const selectedDriver =
-    availableDrivers.find((d) => d.id === selectedDriverId) ||
-    availableDrivers[0] ||
-    null;
+    availableDrivers.find((d) => d.id === selectedDriverId) || null;
+
+  const pickDriver = (driverId) => {
+    setAssignMode('choose');
+    setSelectedDriverId(driverId);
+    setDriverPickerOpen(false);
+  };
 
   const childHasActiveRide = (childId) =>
     !!rideForChild(
@@ -995,6 +1000,8 @@ export default function HomeDashboard() {
                       {fareQuote.etaMinutes != null
                         ? ` · ${formatEtaMinutes(fareQuote.etaMinutes)}`
                         : ''}
+                      {fareQuote.trafficLabel ? ` · ${fareQuote.trafficLabel}` : ''}
+                      {fareQuote.hasClosure ? ' · road closure' : ''}
                     </span>
                     <span className="font-bold text-white">
                       {formatMoney(fareQuote.fareCents)}
@@ -1011,7 +1018,10 @@ export default function HomeDashboard() {
               <div className="mb-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setAssignMode('nearest')}
+                  onClick={() => {
+                    setAssignMode('nearest');
+                    setDriverPickerOpen(false);
+                  }}
                   className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     assignMode === 'nearest'
                       ? 'bg-white font-semibold text-slate-900'
@@ -1031,14 +1041,17 @@ export default function HomeDashboard() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAssignMode('choose')}
+                  onClick={() => {
+                    setAssignMode('choose');
+                    setDriverPickerOpen(!selectedDriver);
+                  }}
                   className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     assignMode === 'choose'
                       ? 'bg-white font-semibold text-slate-900'
                       : 'bg-white/10 text-white hover:bg-white/15'
                   }`}
                 >
-                  <span className="block">Choose driver</span>
+                  <span className="block">Search for driver</span>
                   <span
                     className={`mt-0.5 block text-[11px] font-normal ${
                       assignMode === 'choose'
@@ -1046,7 +1059,7 @@ export default function HomeDashboard() {
                         : 'text-slate-300'
                     }`}
                   >
-                    Pick who you prefer
+                    Pick from available drivers
                   </span>
                 </button>
               </div>
@@ -1061,68 +1074,84 @@ export default function HomeDashboard() {
                   .
                 </p>
               ) : availableDrivers.length > 0 ? (
-                <div className="max-h-48 space-y-2 overflow-y-auto pr-0.5">
-                  {availableDrivers.map((driver) => {
-                    const selected = selectedDriver?.id === driver.id;
-                    return (
-                      <button
-                        key={driver.id}
-                        type="button"
-                        onClick={() => {
-                          setAssignMode('choose');
-                          setSelectedDriverId(driver.id);
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition ${
-                          selected
-                            ? 'bg-white text-slate-900 shadow-md'
-                            : 'bg-white/10 text-white hover:bg-white/15'
-                        }`}
-                      >
-                        <div
-                          className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${
-                            selected ? 'bg-emerald-100' : 'bg-white/10'
-                          }`}
-                        >
-                          🚗
+                <div className="space-y-2">
+                  {selectedDriver && (!driverPickerOpen || instantLoading) ? (
+                    <div
+                      className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5 text-slate-900"
+                      aria-live="polite"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-lg">
+                        🚗
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-sm font-semibold">
+                            {selectedDriver.name}
+                          </span>
+                          {selectedDriver.verified && (
+                            <Shield
+                              size={12}
+                              className="shrink-0 text-emerald-600"
+                              aria-label="Verified driver"
+                            />
+                          )}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate text-sm font-semibold">
-                              {driver.name}
-                            </span>
-                            {driver.verified && (
-                              <Shield
-                                size={12}
-                                className={
-                                  selected
-                                    ? 'text-emerald-600'
-                                    : 'text-emerald-300'
-                                }
-                              />
-                            )}
-                          </div>
-                          <p
-                            className={`mt-0.5 truncate text-xs ${
-                              selected ? 'text-slate-500' : 'text-slate-300'
-                            }`}
-                          >
-                            {driver.vehiclePlate || 'No plate'} · ★{' '}
+                        <p className="mt-0.5 truncate text-xs text-slate-500">
+                          {selectedDriver.vehiclePlate || 'No plate'} · ★{' '}
+                          {selectedDriver.rating}
+                          {selectedDriver.distanceKm != null
+                            ? ` · ${formatDistanceKm(selectedDriver.distanceKm)} away`
+                            : ''}
+                        </p>
+                      </div>
+                      {instantLoading ? (
+                        <span className="shrink-0 text-xs font-semibold text-emerald-700">
+                          Booking…
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDriverPickerOpen(true)}
+                          className="shrink-0 text-xs font-semibold text-emerald-700 hover:underline"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <label
+                        htmlFor="instant-driver-select"
+                        className="block text-xs font-medium text-slate-300"
+                      >
+                        Available drivers
+                      </label>
+                      <select
+                        id="instant-driver-select"
+                        value={selectedDriverId || ''}
+                        onChange={(event) => {
+                          const driverId = event.target.value;
+                          if (!driverId) return;
+                          pickDriver(driverId);
+                        }}
+                        disabled={instantLoading}
+                        className="w-full rounded-xl border border-white/20 bg-slate-800 px-3 py-3 text-sm text-white outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <option value="" disabled>
+                          Select an available driver
+                        </option>
+                        {availableDrivers.map((driver) => (
+                          <option key={driver.id} value={driver.id}>
+                            {driver.name} · {driver.vehiclePlate || 'No plate'} · ★{' '}
                             {driver.rating}
                             {driver.distanceKm != null
                               ? ` · ${formatDistanceKm(driver.distanceKm)}`
                               : ''}
-                          </p>
-                        </div>
-                        <span
-                          className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                            selected
-                              ? 'border-emerald-600 bg-emerald-600'
-                              : 'border-white/40'
-                          }`}
-                        />
-                      </button>
-                    );
-                  })}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
                 </div>
               ) : (
                 <p className="rounded-xl bg-white/10 px-3 py-2.5 text-sm text-slate-300">
@@ -1155,7 +1184,8 @@ export default function HomeDashboard() {
                 (dropoffMode === 'custom' &&
                   !customDropoffPlace &&
                   !customDropoff.trim()) ||
-                (assignMode === 'choose' && availableDrivers.length === 0)
+                (assignMode === 'choose' &&
+                  (!selectedDriver || availableDrivers.length === 0))
               }
               className="mt-5 w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1167,7 +1197,9 @@ export default function HomeDashboard() {
                     ? 'Add a school to book'
                     : assignMode === 'choose' && availableDrivers.length === 0
                     ? 'No drivers available'
-                    : (() => {
+                    : assignMode === 'choose' && !selectedDriver
+                      ? 'Select a driver'
+                      : (() => {
                         const fareBit = fareQuote
                           ? ` · ${formatMoney(fareQuote.fareCents)}`
                           : '';
@@ -1214,8 +1246,7 @@ export default function HomeDashboard() {
           availableDrivers={availableDrivers}
           selectedDriver={selectedDriver}
           assignMode={assignMode}
-          setAssignMode={setAssignMode}
-          setSelectedDriverId={setSelectedDriverId}
+          onSelectDriver={pickDriver}
           childProfiles={children}
           activeRides={activeRides}
           selectedChildId={selectedChildId}

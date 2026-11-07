@@ -5,8 +5,14 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapPin, Radio, RefreshCw, Users } from 'lucide-react';
 import { adminApi } from '../lib/api';
 import { connectSocket } from '../lib/socket';
-import { DEFAULT_HOME, mapboxToken } from '../lib/geo';
+import { DEFAULT_HOME, fetchDrivingRoute, mapboxToken } from '../lib/geo';
 import { attachMapGeocoder } from '../lib/mapGeocoder';
+import {
+  createSchoolRunMap,
+  drawLine,
+  drawTrafficRoute,
+  removeDrawnLine,
+} from '../lib/mapStyle';
 import MapBottomDrawer from '../components/MapBottomDrawer';
 
 const DRIVER_COLORS = [
@@ -82,36 +88,11 @@ export default function AdminTransitMap() {
 
   const rideList = Object.values(rides);
 
-  const upsertLine = useCallback((sourceId, layerId, feature, paint) => {
-    if (!map.current) return;
-    if (map.current.getSource(sourceId)) {
-      map.current.getSource(sourceId).setData(feature);
-    } else {
-      map.current.addSource(sourceId, { type: 'geojson', data: feature });
-      map.current.addLayer({
-        id: layerId,
-        type: 'line',
-        source: sourceId,
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint,
-      });
-    }
-  }, []);
-
   const removeRideLayers = useCallback((rideId) => {
     if (!map.current) return;
-    const ids = [
-      [`trail-${rideId}`, `trail-line-${rideId}`],
-      [`route-${rideId}`, `route-line-${rideId}`],
-    ];
-    for (const [sourceId, layerId] of ids) {
-      try {
-        if (map.current.getLayer(layerId)) map.current.removeLayer(layerId);
-        if (map.current.getSource(sourceId)) map.current.removeSource(sourceId);
-      } catch {
-        /* ignore */
-      }
-    }
+    removeDrawnLine(map.current, `trail-${rideId}`);
+    removeDrawnLine(map.current, `route-${rideId}`);
+    removeDrawnLine(map.current, `route-${rideId}-full`);
     const markers = markersRef.current.get(rideId);
     if (markers) {
       markers.driver?.remove();
@@ -121,37 +102,31 @@ export default function AdminTransitMap() {
     }
   }, []);
 
-  const loadRoute = useCallback(
-    async (rideId, from, to, color) => {
-      const token = mapboxToken();
-      if (!token || !from || !to || !map.current) return;
-      const now = Date.now();
-      const last = routeCache.current.get(rideId) || 0;
-      if (now - last < 15000) return;
-      routeCache.current.set(rideId, now);
+  const loadRoute = useCallback(async (rideId, from, to, color, { reference = false } = {}) => {
+    if (!from || !to || !map.current) return;
+    const now = Date.now();
+    const last = routeCache.current.get(rideId) || 0;
+    if (now - last < 15000) return;
+    routeCache.current.set(rideId, now);
 
-      try {
-        const query = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
-        const res = await fetch(query);
-        const data = await res.json();
-        if (!data.routes?.[0]) return;
-        upsertLine(
-          `route-${rideId}`,
-          `route-line-${rideId}`,
-          { type: 'Feature', geometry: data.routes[0].geometry },
-          {
-            'line-color': color,
-            'line-width': 4,
-            'line-opacity': 0.45,
-            'line-dasharray': [1.2, 1.2],
-          },
-        );
-      } catch {
-        /* ignore */
-      }
-    },
-    [upsertLine],
-  );
+    try {
+      const route = await fetchDrivingRoute(
+        { lng: from[0], lat: from[1] },
+        { lng: to[0], lat: to[1] },
+        { steps: false },
+      );
+      if (!route?.geometry || !map.current) return;
+      drawTrafficRoute(map.current, `route-${rideId}`, route, {
+        color,
+        width: reference ? 3 : 5,
+        opacity: reference ? 0.4 : 0.9,
+        dash: reference ? [1.2, 1.2] : undefined,
+        congestion: !reference,
+      });
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const ensureMarkers = useCallback((ride, color) => {
     if (!map.current) return;
@@ -171,7 +146,11 @@ export default function AdminTransitMap() {
       el.textContent = '🚗';
       el.title = ride.driverName || 'Driver';
 
-      const driver = new mapboxgl.Marker({ element: el })
+      const driver = new mapboxgl.Marker({
+        element: el,
+        rotationAlignment: 'map',
+        pitchAlignment: 'map',
+      })
         .setLngLat([
           ride.driverLocation?.lng ?? ride.pickupCoords?.lng ?? DEFAULT_HOME.lng,
           ride.driverLocation?.lat ?? ride.pickupCoords?.lat ?? DEFAULT_HOME.lat,
@@ -215,12 +194,15 @@ export default function AdminTransitMap() {
           ride.driverLocation.lng,
           ride.driverLocation.lat,
         ]);
+        if (ride.driverLocation.heading != null) {
+          bundle.driver.setRotation(ride.driverLocation.heading || 0);
+        }
       }
 
       if (ride.trail?.length) {
         const feature = trailToFeature(ride.trail);
         if (feature.geometry.coordinates.length) {
-          upsertLine(`trail-${ride.id}`, `trail-line-${ride.id}`, feature, {
+          drawLine(map.current, `trail-${ride.id}`, feature, {
             'line-color': color,
             'line-width': 5,
             'line-opacity': 0.9,
@@ -239,20 +221,19 @@ export default function AdminTransitMap() {
           ? [ride.dropoffCoords.lng, ride.dropoffCoords.lat]
           : null;
       if (from && to) {
-        // Planned remaining route driver → dropoff
         loadRoute(ride.id, from, to, color);
-        // Also show full pickup→dropoff once
         if (ride.pickupCoords?.lng != null) {
           loadRoute(
             `${ride.id}-full`,
             [ride.pickupCoords.lng, ride.pickupCoords.lat],
             to,
             color,
+            { reference: true },
           );
         }
       }
     },
-    [ensureMarkers, upsertLine, loadRoute],
+    [ensureMarkers, loadRoute],
   );
 
   const fitAll = useCallback(() => {
@@ -331,15 +312,14 @@ export default function AdminTransitMap() {
     }
     if (!mapContainer.current || map.current) return undefined;
 
-    mapboxgl.accessToken = token;
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
+    map.current = createSchoolRunMap(mapContainer.current, {
+      accessToken: token,
       center: [DEFAULT_HOME.lng, DEFAULT_HOME.lat],
       zoom: 11.5,
-      pitch: 30,
+      pitch: 45,
+      hdRoads: true,
+      showCompass: true,
     });
-    map.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     map.current.on('load', () => {
       setMapReady(true);
       geocoderCleanup.current = attachMapGeocoder(map.current, {

@@ -16,6 +16,11 @@ import {
   watchPosition,
 } from "../lib/geo";
 import { attachMapGeocoder } from "../lib/mapGeocoder";
+import {
+  createSchoolRunMap,
+  drawLine,
+  drawTrafficRoute,
+} from "../lib/mapStyle";
 import MapBottomDrawer from "../components/MapBottomDrawer";
 
 function toLngLat(coords, fallback) {
@@ -65,7 +70,11 @@ function applyRouteMetrics(route, setEta, setDistance, setNavStep, currentPos) {
   }
   const kmLabel = formatDistanceKm(route.distanceKm);
   const etaLabel = formatEtaMinutes(route.etaMinutes);
-  setDistance(kmLabel ? `${kmLabel} remaining` : "");
+  const parts = [];
+  if (kmLabel) parts.push(`${kmLabel} remaining`);
+  if (route.trafficLabel) parts.push(route.trafficLabel);
+  if (route.hasClosure) parts.push("road closure");
+  setDistance(parts.join(" · "));
   setEta(etaLabel !== "—" ? `${etaLabel} left` : "Calculating…");
   if (setNavStep) {
     const step = currentPos
@@ -117,35 +126,16 @@ export default function LiveTracking() {
     toLngLat(null, [DEFAULT_SCHOOL.lng, DEFAULT_SCHOOL.lat]),
   );
 
-  const upsertLine = useCallback((sourceId, layerId, feature, paint) => {
-    if (!map.current) return;
-    if (map.current.getSource(sourceId)) {
-      map.current.getSource(sourceId).setData(feature);
-    } else {
-      map.current.addSource(sourceId, { type: "geojson", data: feature });
-      map.current.addLayer({
-        id: layerId,
-        type: "line",
-        source: sourceId,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint,
-      });
-    }
+  const setTrailOnMap = useCallback((trail) => {
+    trailRef.current = trail || [];
+    const feature = trailToGeoJSON(trailRef.current);
+    if (!feature.geometry.coordinates.length || !map.current) return;
+    drawLine(map.current, "driver-trail", feature, {
+      "line-color": "#2563eb",
+      "line-width": 6,
+      "line-opacity": 0.95,
+    });
   }, []);
-
-  const setTrailOnMap = useCallback(
-    (trail) => {
-      trailRef.current = trail || [];
-      const feature = trailToGeoJSON(trailRef.current);
-      if (!feature.geometry.coordinates.length) return;
-      upsertLine("driver-trail", "driver-trail-line", feature, {
-        "line-color": "#2563eb",
-        "line-width": 7,
-        "line-opacity": 0.95,
-      });
-    },
-    [upsertLine],
-  );
 
   const moveDriverMarker = useCallback(
     (lng, lat, heading = 0, visible = true) => {
@@ -224,27 +214,23 @@ export default function LiveTracking() {
       if (!lastRouteAt.current) {
         applyRouteMetrics(route, setEta, setDistance, null, null);
       }
-      upsertLine(
-        "planned-route",
-        "planned-route-line",
-        { type: "Feature", geometry: route.geometry },
-        {
-          "line-color": "#93c5fd",
-          "line-width": 5,
-          "line-opacity": 0.55,
-          "line-dasharray": [1.5, 1.5],
-        },
-      );
+      drawTrafficRoute(map.current, "planned-route", route, {
+        color: "#93c5fd",
+        width: 4,
+        opacity: 0.55,
+        dash: [1.5, 1.5],
+        congestion: false,
+      });
     },
-    [upsertLine],
+    [],
   );
 
   /**
    * Live remaining route from current position → active destination.
-   * Distance is road km from Mapbox; ETA is calculated from that km.
+   * Distance is road km; ETA uses live traffic when the traffic profile responds.
    */
   const loadRemainingRoute = useCallback(
-    async (from, to, { force = false, withSteps = false } = {}) => {
+    async (from, to, { force = false, withSteps = false, bearing } = {}) => {
       if (!map.current || !from || !to) return null;
       const now = Date.now();
       // Throttle Directions API (still re-pick next step locally between fetches)
@@ -263,6 +249,7 @@ export default function LiveTracking() {
 
       const route = await fetchDrivingRoute(from, to, {
         steps: withSteps || isDriver,
+        bearing,
       });
       if (!route) return null;
 
@@ -270,19 +257,14 @@ export default function LiveTracking() {
       const pos = Array.isArray(from) ? { lng: from[0], lat: from[1] } : from;
       applyRouteMetrics(route, setEta, setDistance, setNavStep, pos);
 
-      upsertLine(
-        "remaining-route",
-        "remaining-route-line",
-        { type: "Feature", geometry: route.geometry },
-        {
-          "line-color": "#10b981",
-          "line-width": isDriver ? 6 : 4,
-          "line-opacity": 0.9,
-        },
-      );
+      drawTrafficRoute(map.current, "remaining-route", route, {
+        color: "#10b981",
+        width: isDriver ? 6 : 4,
+        opacity: 0.95,
+      });
       return route;
     },
-    [upsertLine, isDriver],
+    [isDriver],
   );
 
   /** Driver: re-route from current GPS to pickup or drop-off */
@@ -294,6 +276,7 @@ export default function LiveTracking() {
       await loadRemainingRoute([pos.lng, pos.lat], dest.coords, {
         force,
         withSteps: true,
+        bearing: pos.heading,
       });
     },
     [getNavDestination, loadRemainingRoute],
@@ -364,7 +347,6 @@ export default function LiveTracking() {
     }
     if (!mapContainer.current || map.current) return undefined;
 
-    mapboxgl.accessToken = token;
     let cancelled = false;
 
     const from = pickupLngLat.current;
@@ -372,17 +354,14 @@ export default function LiveTracking() {
     const mid = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
 
     try {
-      map.current = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: "mapbox://styles/mapbox/streets-v12",
+      map.current = createSchoolRunMap(mapContainer.current, {
+        accessToken: token,
         center: mid,
         zoom: 13.5,
-        pitch: 40,
+        pitch: 45,
+        hdRoads: true,
+        showCompass: true,
       });
-      map.current.addControl(
-        new mapboxgl.NavigationControl({ showCompass: false }),
-        "top-right",
-      );
 
       // Pause follow when user pans the map
       map.current.on("dragstart", () => {
@@ -412,6 +391,7 @@ export default function LiveTracking() {
         driverMarker.current = new mapboxgl.Marker({
           element: el,
           rotationAlignment: "map",
+          pitchAlignment: "map",
         })
           .setLngLat(from)
           .addTo(map.current);

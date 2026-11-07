@@ -7,6 +7,7 @@ import {
   mapboxToken,
   reverseGeocode,
 } from '../lib/geo';
+import { createSchoolRunMap, highlightBuilding } from '../lib/mapStyle';
 
 /**
  * Compact Mapbox map for pinning a place (school / home).
@@ -21,6 +22,7 @@ export default function LocationPinMap({
   const container = useRef(null);
   const map = useRef(null);
   const marker = useRef(null);
+  const selectedBuilding = useRef(null);
   const onPinRef = useRef(onPin);
   const [ready, setReady] = useState(false);
   const [missingToken, setMissingToken] = useState(false);
@@ -35,21 +37,17 @@ export default function LocationPinMap({
     }
     if (!container.current || map.current) return undefined;
 
-    mapboxgl.accessToken = token;
     const start = hasLngLat(place)
       ? [place.lng, place.lat]
       : [DEFAULT_HOME.lng, DEFAULT_HOME.lat];
 
-    map.current = new mapboxgl.Map({
-      container: container.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
+    map.current = createSchoolRunMap(container.current, {
+      accessToken: token,
       center: start,
-      zoom: hasLngLat(place) ? 14 : 11.5,
+      zoom: hasLngLat(place) ? 15 : 11.5,
+      pitch: 0,
+      showCompass: false,
     });
-    map.current.addControl(
-      new mapboxgl.NavigationControl({ showCompass: false }),
-      'top-right',
-    );
 
     map.current.on('load', () => {
       map.current?.resize();
@@ -57,6 +55,7 @@ export default function LocationPinMap({
     });
 
     map.current.on('click', async (e) => {
+      highlightBuilding(map.current, e.point, selectedBuilding);
       const { lng, lat } = e.lngLat;
       let label = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
       try {
@@ -94,7 +93,12 @@ export default function LocationPinMap({
         )
         .addTo(map.current);
     }
-    map.current.easeTo({ center: lngLat, zoom: 14, duration: 450 });
+    map.current.easeTo({
+      center: lngLat,
+      zoom: Math.max(map.current.getZoom(), 16),
+      pitch: 42,
+      duration: 450,
+    });
   }, [ready, place?.lng, place?.lat, place?.label, pinColor]);
 
   if (missingToken) {

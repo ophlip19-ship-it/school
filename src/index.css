@@ -78,9 +78,12 @@ textarea {
   background: #f1f5f9;
 }
 
-/* Mapbox Geocoder — compact, mobile-friendly */
-.map-fullscreen .mapboxgl-ctrl-geocoder,
-.map-geocoder-host .mapboxgl-ctrl-geocoder {
+/* Search Box control — compact, mobile-friendly */
+.mapboxgl-ctrl-geocoder {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: #fff;
   min-width: 0;
   width: min(72vw, 320px);
   max-width: calc(100vw - 6.5rem);
@@ -89,11 +92,40 @@ textarea {
   font-size: 14px;
 }
 
-.map-fullscreen .mapboxgl-ctrl-geocoder--input,
-.map-geocoder-host .mapboxgl-ctrl-geocoder--input {
+.mapboxgl-ctrl-geocoder--icon-search {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  pointer-events: none;
+}
+
+.mapboxgl-ctrl-geocoder--input {
+  width: 100%;
   height: 42px;
-  padding-left: 36px;
+  padding: 0 36px;
+  border: 0;
   border-radius: 9999px;
+  background: transparent;
+  outline: none;
+  color: #0f172a;
+}
+
+.mapboxgl-ctrl-geocoder--input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.mapboxgl-ctrl-geocoder--button {
+  position: absolute;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: #64748b;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .map-fullscreen .mapboxgl-ctrl-top-left,
@@ -102,13 +134,53 @@ textarea {
   left: 0.75rem;
   right: auto;
   max-width: calc(100% - 5rem);
+  z-index: 3;
 }
 
-.map-fullscreen .mapboxgl-ctrl-geocoder .suggestions,
-.map-geocoder-host .mapboxgl-ctrl-geocoder .suggestions {
+.mapboxgl-ctrl-geocoder .suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: 16rem;
+  overflow: auto;
+  background: #fff;
   border-radius: 1rem;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
-  overflow: hidden;
+}
+
+.mapboxgl-ctrl-geocoder--suggestion {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mapboxgl-ctrl-geocoder--suggestion:last-child {
+  border-bottom: 0;
+}
+
+.mapboxgl-ctrl-geocoder--suggestion:hover,
+.mapboxgl-ctrl-geocoder--suggestion:focus {
+  background: #f8fafc;
+}
+
+.mapboxgl-ctrl-geocoder--suggestion-title {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mapboxgl-ctrl-geocoder--suggestion-address {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .map-fullscreen .mapboxgl-ctrl-bottom-right {

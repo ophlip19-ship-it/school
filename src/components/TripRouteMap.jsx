@@ -19,6 +19,7 @@ import {
   tripStatusLabel,
 } from '../lib/childTrips';
 import { createChildPinEl } from '../lib/mapMarkers';
+import { createSchoolRunMap, drawTrafficRoute } from '../lib/mapStyle';
 
 function placeLngLat(place) {
   if (!hasLngLat(place)) return null;
@@ -114,24 +115,19 @@ export default function TripRouteMap({
     }
     if (!container.current || map.current) return undefined;
 
-    mapboxgl.accessToken = token;
     const start = from
       ? [from.lng, from.lat]
       : to
         ? [to.lng, to.lat]
         : [DEFAULT_HOME.lng, DEFAULT_HOME.lat];
 
-    map.current = new mapboxgl.Map({
-      container: container.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
+    map.current = createSchoolRunMap(container.current, {
+      accessToken: token,
       center: start,
       zoom: 12.5,
-      interactive: true,
+      pitch: 0,
+      showCompass: false,
     });
-    map.current.addControl(
-      new mapboxgl.NavigationControl({ showCompass: false }),
-      'top-right',
-    );
     map.current.on('load', () => {
       map.current?.resize();
       setReady(true);
@@ -153,22 +149,6 @@ export default function TripRouteMap({
     // Camera is updated when pins change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const upsertLine = (sourceId, layerId, feature, paint) => {
-    if (!map.current) return;
-    if (map.current.getSource(sourceId)) {
-      map.current.getSource(sourceId).setData(feature);
-    } else {
-      map.current.addSource(sourceId, { type: 'geojson', data: feature });
-      map.current.addLayer({
-        id: layerId,
-        type: 'line',
-        source: sourceId,
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint,
-      });
-    }
-  };
 
   const placeMarker = (ref, place, color, fallbackLabel) => {
     if (!map.current) return;
@@ -225,16 +205,13 @@ export default function TripRouteMap({
       lastRouteAt.current = Date.now();
       const route = await fetchDrivingRoute(routeFrom, to, { steps: false });
       if (cancelled || !map.current || !route?.geometry) return;
-      upsertLine(
-        'trip-route',
-        'trip-route-line',
-        { type: 'Feature', geometry: route.geometry },
-        {
-          'line-color': focusedTrip ? colorForKey(focusedTrip.childId || focusedTrip.id) : '#10b981',
-          'line-width': 4,
-          'line-opacity': 0.85,
-        },
-      );
+      drawTrafficRoute(map.current, 'trip-route', route, {
+        color: focusedTrip
+          ? colorForKey(focusedTrip.childId || focusedTrip.id)
+          : '#10b981',
+        width: 4,
+        opacity: 0.85,
+      });
     })();
 
     return () => {

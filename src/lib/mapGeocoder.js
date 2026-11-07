@@ -1,8 +1,10 @@
-import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder';
-import mapboxgl from 'mapbox-gl';
-import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
 import { DEFAULT_HOME, mapboxToken } from './geo';
 import { filterAddressDatabase } from './addressDatabase';
+import {
+  placeFromFeature,
+  searchBoxRetrieve,
+  searchBoxSuggest,
+} from './mapSearch';
 
 /** Lagos metro bias for search ranking */
 export const GEOCODER_PROXIMITY = {
@@ -10,9 +12,15 @@ export const GEOCODER_PROXIMITY = {
   latitude: DEFAULT_HOME.lat,
 };
 
+function sessionToken() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `sr-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 /**
- * LocalGeocoder for Mapbox control — filters the in-app address database.
- * Returns GeoJSON features so they appear alongside Mapbox results.
+ * Local hits shaped like the old geocoder localGeocoder (GeoJSON features).
  */
 export function localAddressGeocoder(query) {
   const hits = filterAddressDatabase(query, { limit: 6 });
@@ -35,62 +43,248 @@ export function localAddressGeocoder(query) {
   }));
 }
 
-/**
- * Create a Mapbox Geocoder control for location search & filter.
- * Biased toward Lagos / Nigeria school-run usage.
- * Merges local address database results via localGeocoder.
- *
- * @param {object} [options]
- * @param {string} [options.placeholder]
- * @param {boolean} [options.marker] — show a pin on result (default false)
- * @param {string} [options.countries] — ISO country codes (default 'ng')
- * @param {{longitude:number,latitude:number}} [options.proximity]
- * @param {string} [options.types]
- * @param {number} [options.limit]
- * @param {string} [options.accessToken]
- */
-export function createMapGeocoder(options = {}) {
-  const accessToken = options.accessToken || mapboxToken();
-  if (!accessToken) {
-    throw new Error('Mapbox token required for geocoder');
+function proximityParam(map, override) {
+  if (override?.longitude != null && override?.latitude != null) {
+    return `${override.longitude},${override.latitude}`;
   }
-
-  return new MapboxGeocoder({
-    accessToken,
-    mapboxgl,
-    marker: options.marker === true,
-    placeholder: options.placeholder || 'Search location…',
-    countries: options.countries ?? 'ng',
-    proximity: options.proximity || GEOCODER_PROXIMITY,
-    types:
-      options.types ||
-      'address,poi,place,locality,neighborhood,district',
-    limit: options.limit ?? 6,
-    clearOnBlur: false,
-    collapsed: false,
-    localGeocoder: options.localGeocoder || localAddressGeocoder,
-    localGeocoderOnly: options.localGeocoderOnly === true,
-    ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
-  });
+  try {
+    const c = map?.getCenter?.();
+    if (c) return `${c.lng},${c.lat}`;
+  } catch {
+    /* map gone */
+  }
+  return `${GEOCODER_PROXIMITY.longitude},${GEOCODER_PROXIMITY.latitude}`;
 }
 
 /**
- * Attach a geocoder to a map instance and wire result/clear handlers.
+ * Map control: local address book + Mapbox Search Box suggest/retrieve.
+ * Search Box is the current autocomplete API (POIs and addresses).
+ */
+class SearchBoxControl {
+  constructor(options = {}) {
+    this.options = options;
+    this._map = null;
+    this._container = null;
+    this._input = null;
+    this._list = null;
+    this._clearBtn = null;
+    this._session = sessionToken();
+    this._timer = null;
+    this._abort = 0;
+    this._items = [];
+    this._onDocPointer = (event) => {
+      if (!this._container?.contains(event.target)) this._hideList();
+    };
+  }
+
+  onAdd(map) {
+    this._map = map;
+    const root = document.createElement('div');
+    root.className = 'mapboxgl-ctrl mapboxgl-ctrl-geocoder';
+
+    const icon = document.createElement('span');
+    icon.className = 'mapboxgl-ctrl-geocoder--icon-search';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML =
+      '<svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="#64748b" stroke-width="2"><circle cx="8" cy="8" r="5.5"/><path d="M12.5 12.5L16 16" stroke-linecap="round"/></svg>';
+
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'mapboxgl-ctrl-geocoder--input';
+    input.placeholder = this.options.placeholder || 'Search location…';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-label', input.placeholder);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'mapboxgl-ctrl-geocoder--button';
+    clearBtn.setAttribute('aria-label', 'Clear search');
+    clearBtn.textContent = '×';
+    clearBtn.hidden = true;
+
+    const list = document.createElement('div');
+    list.className = 'suggestions';
+    list.hidden = true;
+
+    root.append(icon, input, clearBtn, list);
+    root.addEventListener('mousedown', (event) => event.stopPropagation());
+    root.addEventListener('click', (event) => event.stopPropagation());
+
+    input.addEventListener('input', () => {
+      clearBtn.hidden = !input.value;
+      this._schedule(input.value);
+    });
+    input.addEventListener('focus', () => {
+      if (this._items.length) list.hidden = false;
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        this._hideList();
+        input.blur();
+      } else if (event.key === 'Enter' && this._items[0]) {
+        event.preventDefault();
+        this._choose(this._items[0]);
+      }
+    });
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      clearBtn.hidden = true;
+      this._items = [];
+      this._hideList();
+      this._session = sessionToken();
+      this.options.onClear?.();
+      input.focus();
+    });
+
+    this._container = root;
+    this._input = input;
+    this._list = list;
+    this._clearBtn = clearBtn;
+    document.addEventListener('pointerdown', this._onDocPointer);
+    return root;
+  }
+
+  onRemove() {
+    document.removeEventListener('pointerdown', this._onDocPointer);
+    if (this._timer) clearTimeout(this._timer);
+    this._abort += 1;
+    this._container?.remove();
+    this._map = null;
+    this._container = null;
+  }
+
+  _hideList() {
+    if (this._list) this._list.hidden = true;
+  }
+
+  _schedule(value) {
+    if (this._timer) clearTimeout(this._timer);
+    const q = value.trim();
+    if (!q) {
+      this._items = [];
+      this._hideList();
+      return;
+    }
+    this._timer = setTimeout(() => {
+      this._search(q);
+    }, 280);
+  }
+
+  async _search(q) {
+    const token = this._abort + 1;
+    this._abort = token;
+    const local = (this.options.localGeocoder || localAddressGeocoder)(q).map(
+      (feature) => ({
+        kind: 'local',
+        title: feature.text || feature.place_name,
+        subtitle: feature.properties?.area || 'Saved place',
+        feature,
+      }),
+    );
+
+    let remote = [];
+    if (q.length >= 2 && this.options.localGeocoderOnly !== true) {
+      const accessToken = this.options.accessToken || mapboxToken();
+      const suggestions = await searchBoxSuggest(q, {
+        token: accessToken,
+        sessionToken: this._session,
+        proximity: proximityParam(this._map, this.options.proximity),
+        country: this.options.countries || 'ng',
+        limit: this.options.limit ?? 6,
+        types: this.options.types,
+      });
+      if (this._abort !== token) return;
+      const localNames = new Set(
+        local.map((item) => String(item.title || '').toLowerCase()),
+      );
+      remote = suggestions
+        .filter((s) => s?.mapbox_id && s.feature_type !== 'category')
+        .filter((s) => !localNames.has(String(s.name || '').toLowerCase()))
+        .map((s) => ({
+          kind: 'mapbox',
+          title: s.name || s.full_address || 'Place',
+          subtitle: s.full_address || s.place_formatted || s.feature_type || '',
+          suggestion: s,
+        }));
+    }
+
+    if (this._abort !== token) return;
+    this._items = [...local, ...remote].slice(0, 8);
+    this._renderList();
+  }
+
+  _renderList() {
+    const list = this._list;
+    if (!list) return;
+    list.replaceChildren();
+    if (!this._items.length) {
+      list.hidden = true;
+      return;
+    }
+    for (const item of this._items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mapboxgl-ctrl-geocoder--suggestion';
+
+      const title = document.createElement('span');
+      title.className = 'mapboxgl-ctrl-geocoder--suggestion-title';
+      title.textContent = item.title;
+
+      const meta = document.createElement('span');
+      meta.className = 'mapboxgl-ctrl-geocoder--suggestion-address';
+      meta.textContent =
+        item.kind === 'local' ? `${item.subtitle} · saved` : item.subtitle;
+
+      button.append(title, meta);
+      button.addEventListener('click', () => this._choose(item));
+      list.appendChild(button);
+    }
+    list.hidden = false;
+  }
+
+  async _choose(item) {
+    this._hideList();
+    let place = null;
+    if (item.kind === 'local') {
+      place = placeFromFeature(item.feature);
+    } else if (item.suggestion?.mapbox_id) {
+      const accessToken = this.options.accessToken || mapboxToken();
+      const session = this._session;
+      this._session = sessionToken();
+      place = await searchBoxRetrieve(item.suggestion.mapbox_id, {
+        token: accessToken,
+        sessionToken: session,
+      });
+    }
+    if (!place || !this._map) return;
+    if (this._input) this._input.value = place.label;
+    if (this._clearBtn) this._clearBtn.hidden = false;
+    if (this.options.flyTo !== false) {
+      this._map.flyTo({
+        center: [place.lng, place.lat],
+        zoom: Math.max(this._map.getZoom(), 15),
+        essential: true,
+      });
+    }
+    this.options.onResult?.({
+      label: place.label,
+      lng: place.lng,
+      lat: place.lat,
+      raw: place.raw || item.feature || null,
+    });
+  }
+}
+
+/**
+ * Attach Search Box + local address search to a map.
  * Returns a cleanup function.
- *
- * @param {mapboxgl.Map} map
- * @param {object} [opts]
- * @param {'top-left'|'top-right'|'bottom-left'|'bottom-right'} [opts.position]
- * @param {(result:{label:string,lng:number,lat:number,raw:object})=>void} [opts.onResult]
- * @param {()=>void} [opts.onClear]
- * @param {string} [opts.placeholder]
- * @param {boolean} [opts.flyTo]
- * @param {boolean} [opts.marker]
  */
 export function attachMapGeocoder(map, opts = {}) {
   if (!map) return () => {};
+  if (!mapboxToken() && !opts.accessToken) return () => {};
 
-  const geocoder = createMapGeocoder({
+  const control = new SearchBoxControl({
     placeholder: opts.placeholder,
     marker: opts.marker,
     countries: opts.countries,
@@ -98,56 +292,25 @@ export function attachMapGeocoder(map, opts = {}) {
     types: opts.types,
     limit: opts.limit,
     accessToken: opts.accessToken,
-    extra: {
-      flyTo: opts.flyTo === false ? false : opts.flyTo ?? true,
-    },
+    flyTo: opts.flyTo,
+    onResult: opts.onResult,
+    onClear: opts.onClear,
+    localGeocoder: opts.localGeocoder,
+    localGeocoderOnly: opts.localGeocoderOnly,
   });
-
-  const position = opts.position || 'top-left';
-  map.addControl(geocoder, position);
-
-  const onResult = (e) => {
-    const feature = e?.result;
-    if (!feature?.center) return;
-    const [lng, lat] = feature.center;
-    const label =
-      feature.place_name ||
-      feature.text ||
-      `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    opts.onResult?.({
-      label,
-      lng,
-      lat,
-      raw: feature,
-    });
-  };
-
-  const onClear = () => {
-    opts.onClear?.();
-  };
-
-  geocoder.on('result', onResult);
-  geocoder.on('clear', onClear);
-
+  map.addControl(control, opts.position || 'top-left');
   return () => {
     try {
-      geocoder.off('result', onResult);
-      geocoder.off('clear', onClear);
-      map.removeControl(geocoder);
+      map.removeControl(control);
     } catch {
       /* map may already be removed */
     }
   };
 }
 
-/**
- * Normalize a Mapbox Geocoding feature into { label, lng, lat }.
- */
+/** Normalize a search feature into { label, lng, lat }. */
 export function featureToPlace(feature) {
-  if (!feature?.center) return null;
-  return {
-    label: feature.place_name || feature.text || 'Selected location',
-    lng: feature.center[0],
-    lat: feature.center[1],
-  };
+  const place = placeFromFeature(feature);
+  if (!place) return null;
+  return { label: place.label, lng: place.lng, lat: place.lat };
 }

@@ -487,9 +487,9 @@ export async function searchDestinations(query, opts = {}) {
         results.push({
           id: `mapbox-${r.lng}-${r.lat}`,
           label: r.label,
-          name: r.label.split(',')[0],
+          name: r.name || r.label.split(',')[0],
           area: '',
-          type: 'landmark',
+          type: r.featureType === 'poi' ? 'landmark' : r.featureType || 'landmark',
           lng: r.lng,
           lat: r.lat,
           source: 'mapbox',

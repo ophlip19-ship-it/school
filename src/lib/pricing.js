@@ -82,6 +82,8 @@ export async function quoteTripFare(pickupCoords, dropoffCoords) {
           dropoffCoords,
         }),
         etaMinutes: route.etaMinutes ?? null,
+        trafficLabel: route.trafficLabel || '',
+        hasClosure: !!route.hasClosure,
       };
     }
   } catch {
